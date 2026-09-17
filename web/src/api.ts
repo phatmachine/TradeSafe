@@ -37,8 +37,11 @@ export interface StateClassification {
   constraint_ratios?: Record<string, string | null>;
 }
 
+export type Direction = "long" | "short" | "unclear";
+
 export interface StructuralRead {
   setup: string;
+  direction: Direction;
   read: string;
 }
 
@@ -49,6 +52,7 @@ export interface AnalysisReport {
   config_hash: string;
   config_validated: boolean;
   verdict: "GATE_FAIL" | "NO_SETUP" | "ELIGIBLE_SETUP" | "CLASSIFIER_CONFLICT";
+  verdict_bias: Direction | null;
   gate_status: GateResultJSON[];
   data_integrity: Partial<DataIntegrity>;
   state_classification: StateClassification;

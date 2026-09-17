@@ -8,6 +8,12 @@ const VERDICT_COPY: Record<string, { label: string; className: string }> = {
   CLASSIFIER_CONFLICT: { label: "Classifier conflict — trading nothing", className: "classifier_conflict" },
 };
 
+const BIAS_LABEL: Record<string, string> = {
+  long: "Long",
+  short: "Short",
+  unclear: "No clear direction",
+};
+
 export function ReportView({ report }: { report: AnalysisReport }) {
   const verdict = VERDICT_COPY[report.verdict] || { label: report.verdict, className: "no_setup" };
   const di = report.data_integrity;
@@ -21,6 +27,9 @@ export function ReportView({ report }: { report: AnalysisReport }) {
         <div className="verdict-meta mono">
           as of {new Date(report.as_of).toLocaleString()} · config {report.config_hash}
         </div>
+        {report.verdict_bias && (
+          <div className={`bias-flag ${report.verdict_bias}`}>{BIAS_LABEL[report.verdict_bias]}</div>
+        )}
         {!report.config_validated && <div className="unvalidated-flag">Unvalidated thresholds — not yet calibrated</div>}
       </div>
 
@@ -107,7 +116,12 @@ export function ReportView({ report }: { report: AnalysisReport }) {
             </div>
             {report.structural_reads.map((s, i) => (
               <div className="flip-item" key={i}>
-                <div className="flip-title">{s.setup.replace(/_/g, " ")}</div>
+                <div className="flip-title">
+                  {s.setup.replace(/_/g, " ")}{" "}
+                  <span className={`bias-flag ${s.direction}`} style={{ marginTop: 0, verticalAlign: "middle" }}>
+                    {BIAS_LABEL[s.direction]}
+                  </span>
+                </div>
                 <div className="flip-detail">{s.read}</div>
               </div>
             ))}

@@ -14,10 +14,18 @@ def _render_gate(gate: dict) -> str:
     return "\n".join(lines)
 
 
+_BIAS_LABEL = {"long": "LONG", "short": "SHORT", "unclear": "NO CLEAR DIRECTION"}
+
+
 def render_text(report: AnalysisReport) -> str:
     d = report.to_dict()
+    bias = d["verdict_bias"]
+    verdict_line = f"=== {d['instrument']} — {d['verdict']}"
+    if bias:
+        verdict_line += f" ({_BIAS_LABEL[bias]})"
+    verdict_line += " ==="
     lines = [
-        f"=== {d['instrument']} — {d['verdict']} ===",
+        verdict_line,
         f"as_of: {d['as_of']}   config_hash: {d['config_hash']}"
         + ("   [UNVALIDATED THRESHOLDS]" if not d["config_validated"] else ""),
         "",
@@ -55,7 +63,7 @@ def render_text(report: AnalysisReport) -> str:
     if d["structural_reads"]:
         lines += ["", "-- Structural read (evidence, not a recommendation) --"]
         for item in d["structural_reads"]:
-            lines.append(f"  [{item['setup']}] {item['read']}")
+            lines.append(f"  [{item['setup']}] ({item['direction']}) {item['read']}")
 
     if d["distance_to_flip"]:
         lines += ["", "-- Distance to flip --"]

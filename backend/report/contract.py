@@ -68,34 +68,61 @@ def _distance_to_flip(gate: GateResult) -> list[dict]:
     return out
 
 
-def _structural_read(setup_name: str, cohort: cohort_mod.Cohort) -> str:
+def _structural_read(setup_name: str, cohort: cohort_mod.Cohort) -> dict:
     """A stated-as-fact, non-imperative read of which side a qualifying setup's own
     evidence points toward — never "buy"/"sell", only what the setup + trapped-cohort
-    classification together already say. Two of the four setups don't encode a
-    direction at all (positioning_exhaustion, event_decompression); this says so
-    honestly rather than guessing one to fill the gap."""
+    classification together already say. `direction` is "long" | "short" | "unclear";
+    as coded today no setup's own conditions ever resolve to "short" (cascade_absorption
+    and trend_continuation_leverage_reset are both long-side only by construction — see
+    each module's docstring), which the caller surfaces rather than hides."""
     if setup_name == cascade.SETUP_NAME:
         if cohort == cohort_mod.Cohort.TRAPPED_LONGS:
-            return (
-                "Long — forced-selling cascade absorbed; the trapped_longs cohort finished "
-                "capitulating (doctrine: enter only after a cohort is confirmed destroyed)."
-            )
-        return (
-            f"Not determinable — this setup's own conditions describe a long-side "
-            f"forced-selling washout, but the trapped cohort came out {cohort.value}; "
-            "treat this as conflicting evidence, not a clean read."
-        )
+            return {
+                "direction": "long",
+                "read": (
+                    "Long — forced-selling cascade absorbed; the trapped_longs cohort finished "
+                    "capitulating (doctrine: enter only after a cohort is confirmed destroyed)."
+                ),
+            }
+        return {
+            "direction": "unclear",
+            "read": (
+                f"Not determinable — this setup's own conditions describe a long-side "
+                f"forced-selling washout, but the trapped cohort came out {cohort.value}; "
+                "treat this as conflicting evidence, not a clean read."
+            ),
+        }
     if setup_name == continuation.SETUP_NAME:
-        return (
-            "Long — trend_continuation_leverage_reset only ever evaluates in a confirmed "
-            "uptrend (regime-gated in report/contract.py); no short equivalent exists in "
-            "this build."
-        )
-    return (
-        "Not determinable from this setup alone — it identifies exhausted or one-sided "
-        f"positioning but doesn't encode which way it resolves; pair trapped_cohort "
-        f"({cohort.value}) and regime with your own read of the market."
-    )
+        return {
+            "direction": "long",
+            "read": (
+                "Long — trend_continuation_leverage_reset only ever evaluates in a confirmed "
+                "uptrend (regime-gated in report/contract.py); no short equivalent exists in "
+                "this build."
+            ),
+        }
+    return {
+        "direction": "unclear",
+        "read": (
+            "Not determinable from this setup alone — it identifies exhausted or one-sided "
+            f"positioning but doesn't encode which way it resolves; pair trapped_cohort "
+            f"({cohort.value}) and regime with your own read of the market."
+        ),
+    }
+
+
+def _verdict_bias(structural_reads: list[dict]) -> str | None:
+    """Rolls per-setup directions up to one banner-level bias. None means the question
+    doesn't apply (no eligible setup at all); "unclear" means a setup qualified but
+    couldn't be read directionally, or different setups disagreed."""
+    if not structural_reads:
+        return None
+    directions = {r["direction"] for r in structural_reads}
+    if directions == {"long"}:
+        return "long"
+    if directions == {"short"}:
+        return "short"
+    return "unclear"
 
 
 @dataclass(frozen=True)
@@ -112,6 +139,7 @@ class AnalysisReport:
     setup_evaluation: list[dict]
     distance_to_flip: list[dict]
     structural_reads: list[dict]
+    verdict_bias: str | None
 
     def to_dict(self) -> dict:
         return {
@@ -121,6 +149,7 @@ class AnalysisReport:
             "config_hash": self.config_hash,
             "config_validated": self.config_validated,
             "verdict": self.verdict,
+            "verdict_bias": self.verdict_bias,
             "gate_status": self.gate_status,
             "data_integrity": self.data_integrity,
             "state_classification": self.state_classification,
@@ -183,6 +212,7 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
             setup_evaluation=[],
             distance_to_flip=_distance_to_flip(gu),
             structural_reads=[],
+            verdict_bias=None,
         )
 
     l0 = layer_0.evaluate(instrument, ds, cfg, registry)
@@ -200,6 +230,7 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
             setup_evaluation=[],
             distance_to_flip=_distance_to_flip(l0.gate_result),
             structural_reads=[],
+            verdict_bias=None,
         )
 
     clean = l0.clean_observations
@@ -231,6 +262,7 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
             setup_evaluation=[],
             distance_to_flip=[],
             structural_reads=[],
+            verdict_bias=None,
         )
 
     cohort_result = cohort_mod.classify(liq_hist, cfg=cfg)
@@ -324,6 +356,7 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
             setup_evaluation=[r.to_dict() for r in setup_results.values()],
             distance_to_flip=[],
             structural_reads=[],
+            verdict_bias=None,
         )
 
     any_eligible = any(r.passed for r in setup_results.values())
@@ -331,10 +364,11 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
     for r in setup_results.values():
         distance_to_flip.extend(_distance_to_flip(r))
     structural_reads = [
-        {"setup": name, "read": _structural_read(name, cohort_result.cohort)}
+        {"setup": name, **_structural_read(name, cohort_result.cohort)}
         for name, r in setup_results.items()
         if r.passed
     ]
+    verdict_bias = _verdict_bias(structural_reads)
 
     return AnalysisReport(
         run_id=run_id,
@@ -343,6 +377,7 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
         config_hash=cfg.config_hash,
         config_validated=cfg.validated,
         verdict=Verdict.ELIGIBLE_SETUP.value if any_eligible else Verdict.NO_SETUP.value,
+        verdict_bias=verdict_bias,
         gate_status=gate_status,
         data_integrity=data_integrity,
         state_classification=state_classification,
