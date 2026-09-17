@@ -33,12 +33,39 @@ expiry:
 # expiry from the 1-hour default to the 15-minute one.
 fast_tape_rv_threshold: 1.0   # 100% annualised realised vol
 
-# 0.4 / 0.8 — cross-venue dispersion tolerance: (max - min) / median, per metric.
-# Above this the metric is flagged and, for decision-path metrics, the run fails closed.
+# 0.4 / 0.8 — cross-venue dispersion tolerance, per metric. Each entry picks a mode:
+#   relative: (max - min) / |median|  — for a metric where every venue reports the same
+#             underlying fact, so divergence is genuinely a corruption signal
+#   absolute: (max - min) in the metric's own units — for a signed metric that sits near
+#             zero, where a median denominator is meaningless
+# Above the ceiling the metric is flagged and, for decision-path metrics, the run fails
+# closed. CALIBRATED 2026-09-18 from measurement; see each note.
 max_dispersion:
-  price: 0.02
-  funding_8h: 0.5
-  oi_coin: 0.15
+  # A single shared fact — every venue is pricing the same asset, so tight agreement is
+  # required and divergence is real corruption. Observed ~0.0005-0.005 across 6 venues,
+  # so 0.02 was already sound and is unchanged.
+  price:
+    relative: 0.02
+
+  # Signed and near zero, so the old relative form was unusable: venue rates of
+  # -0.035 / +0.003 / -0.002 / -0.028 gave a median of -0.0022 and a "dispersion" of
+  # 16.97 against a 0.5 ceiling, while the venues in fact agreed to within 0.04
+  # percentage points. Measured absolute spread per 8h across venues: BTC max 0.0066,
+  # ETH max 0.0140, SOL max 0.0206, ZEC max 0.0451. 0.5 leaves ~11x headroom over the
+  # worst observed while still catching a venue reporting an order-of-magnitude wrong
+  # rate.
+  funding_8h:
+    absolute: 0.5
+
+  # Venue open interest legitimately differs by venue size — Binance 552k vs OKX 146k on
+  # ZEC is market structure, not disagreement about a fact — so the old 0.15 ceiling was
+  # unreachable (measured dispersion never fell below 0.20 on any instrument). Kept as a
+  # relative check purely to catch a units error, which shows up around 20x+; measured
+  # range was 0.20-2.20, so 5.0 tolerates real venue spread with room while still
+  # failing on nonsense. Measured over hours of live collection, not 30 days — worth
+  # re-checking once more history has accumulated.
+  oi_coin:
+    relative: 5.0
 
 # 0.5 — synthetic-content / coherence tolerance for a single source's internally
 # derived fields (e.g. its own OI-in-USD vs OI-in-coins * its own price)

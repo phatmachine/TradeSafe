@@ -129,7 +129,7 @@ def evaluate(instrument: str, ds: DataSource, cfg: Config, registry: SourceRegis
 
     # --- 0.4 / 0.8 dispersion, per metric with >=2 venues reporting -----------------
     max_dispersion_cfg = cfg.get("max_dispersion", default={})
-    for metric_name, ceiling in max_dispersion_cfg.items():
+    for metric_name, spec in max_dispersion_cfg.items():
         try:
             metric = Metric(metric_name)
         except ValueError:
@@ -138,19 +138,33 @@ def evaluate(instrument: str, ds: DataSource, cfg: Config, registry: SourceRegis
         if len(per_venue) < 2:
             continue  # dispersion is not computable with a single venue — not a failure
         values = [v.value for v in per_venue.values()]
-        lo, hi = min(values), max(values)
-        median = sorted(values)[len(values) // 2]
-        if median == 0:
-            continue
-        dispersion = (hi - lo) / abs(median)
-        ceiling_dec = Decimal(str(ceiling))
+        spread = max(values) - min(values)
+
+        # Relative dispersion is only meaningful for a metric where every venue is
+        # reporting the same underlying fact (price). For a signed rate that sits near
+        # zero, the median is a useless denominator — a 0.04pp spread over a -0.002
+        # median reads as 1700% while the venues actually agree closely — so an absolute
+        # spread is the honest test there. See config/thresholds.yaml for the measured
+        # rationale behind each mode.
+        if "absolute" in spec:
+            ceiling_dec = Decimal(str(spec["absolute"]))
+            dispersion = spread
+            basis = f"max-min across {len(per_venue)} venues"
+        else:
+            median = sorted(values)[len(values) // 2]
+            if median == 0:
+                continue
+            ceiling_dec = Decimal(str(spec["relative"]))
+            dispersion = spread / abs(median)
+            basis = f"(max-min)/median across {len(per_venue)} venues"
+
         conditions.append(
             ConditionResult(
                 name=f"dispersion_{metric_name}",
                 status="pass" if dispersion <= ceiling_dec else "fail",
                 computed_value=dispersion,
                 threshold=ceiling_dec,
-                detail=f"(max-min)/median across {len(per_venue)} venues; logged as a signal, never averaged away",
+                detail=f"{basis}; logged as a signal, never averaged away",
             )
         )
 
