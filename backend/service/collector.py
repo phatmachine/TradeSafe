@@ -15,7 +15,7 @@ import signal
 import httpx
 
 from backend.core.config import Config, load_config
-from backend.sources import binance, bybit, chain, hyperliquid, issuer, okx
+from backend.sources import binance, bybit, chain, coinbase, hyperliquid, issuer, kraken, okx
 from backend.sources.base import SourceError
 from backend.sources.liquidations import run_liquidation_listeners
 from backend.store import db
@@ -30,6 +30,8 @@ _FETCHERS = [
     ("bybit", bybit.fetch),
     ("okx", okx.fetch),
     ("hyperliquid", hyperliquid.fetch),
+    ("coinbase", coinbase.fetch),
+    ("kraken", kraken.fetch),
     ("chain", chain.fetch),
     ("issuer", issuer.fetch),
 ]
