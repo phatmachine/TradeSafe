@@ -1,0 +1,16 @@
+# Variant of Dockerfile.web for deploying behind an existing Traefik reverse proxy
+# (see deploy/docker-compose.traefik.yml): Caddy still serves the built frontend and
+# reverse-proxies /api + /health to the api container, but never terminates TLS or binds
+# 80/443 itself — Traefik does both from the host network and forwards decrypted HTTP to
+# this container's :80 over the shared traefik-proxy network. Use Dockerfile.web instead
+# for a standalone box with no reverse proxy in front of it.
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY web/package.json web/package-lock.json* ./
+RUN npm install
+COPY web/ ./
+RUN npm run build
+
+FROM caddy:2-alpine
+COPY --from=build /app/dist /srv
+COPY deploy/Caddyfile.traefik /etc/caddy/Caddyfile

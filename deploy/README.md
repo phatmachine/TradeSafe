@@ -102,6 +102,34 @@ Pick a value that sits in a stable plateau across that table, not a sharp one-of
 update `thresholds.yaml`, and flip `meta.validated: true` once you've done this for the
 thresholds you actually rely on.
 
+## Deploying behind an existing Traefik reverse proxy
+
+If the VPS already runs a Traefik reverse proxy in front of other projects (e.g.
+Hostinger's "Ubuntu 24.04 with Docker and Traefik" template), don't use the root
+`docker-compose.yml` — it binds 80/443 itself for Caddy's own TLS, which will fight
+Traefik for those ports. Use `deploy/docker-compose.traefik.yml` instead: it has no
+Caddy-managed TLS and no host port bindings at all; `web` joins the shared
+`traefik-proxy` external network and picks up routing + a Let's Encrypt certificate
+purely from its `traefik.*` labels, matching how other projects on that box (e.g.
+`payload`, `rethinkthemachine`) are already set up.
+
+```
+docker compose -f deploy/docker-compose.traefik.yml up -d --build
+```
+
+Requires:
+
+- The Traefik instance to be started with `--providers.docker.exposedbydefault=false`,
+  entrypoints named `web`/`websecure`, and a certificate resolver named `letsencrypt`
+  (matching the labels in `deploy/docker-compose.traefik.yml`) — adjust the label names
+  if your Traefik setup differs.
+- An external Docker network named `traefik-proxy` that both Traefik and this stack
+  join (create it once with `docker network create traefik-proxy` if it doesn't already
+  exist).
+- A `.env` next to that compose file with `TRADESAFE_PASSWORD` and `TRADESAFE_SECRET`
+  (no `DOMAIN` needed here — the domain is hardcoded into the `Host(...)` router label
+  instead, since Caddy is no longer the one provisioning TLS for it).
+
 ## 6. Day-to-day operations
 
 - **Updating**: `git pull && docker compose up -d --build`
