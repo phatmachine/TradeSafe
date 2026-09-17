@@ -152,13 +152,19 @@ def evaluate(
     # --- liquidation print settled ------------------------------------------------
     liq_obs = [o for o in liquidation_history if o.metric == Metric.LIQUIDATION]
     if not liq_obs:
+        # UNKNOWN, not pass: an empty liquidation history over the caller's whole
+        # lookback cannot distinguish "the tape genuinely went quiet" (which is what this
+        # condition wants to confirm) from "the feed has never delivered a row", and
+        # treating the second as a pass would let the doctrine's highest-conviction setup
+        # fire with no liquidation evidence behind it at all. Unknown is a distinct state
+        # and is never null-coalesced to a default (gates/common.py).
         conditions.append(
             ConditionResult(
                 name="liquidation_print_settled",
-                status="pass",
+                status="unknown",
                 computed_value=None,
                 threshold=f"{quiet_minutes} min quiet",
-                detail="no liquidation prints observed in the flush window",
+                detail="no liquidation prints in the lookback at all — cannot tell a quiet tape from an absent feed",
             )
         )
     else:

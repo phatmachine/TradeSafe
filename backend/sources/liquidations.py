@@ -29,9 +29,16 @@ from backend.store import db
 
 logger = logging.getLogger("tradesafe.liquidations")
 
-STREAM_URL_TMPL = "wss://fstream.binance.com/ws/{symbol_lower}@forceOrder"
+# The all-market stream rather than one {symbol}@forceOrder connection per instrument.
+# Per-symbol forceOrder is sparse — a quiet symbol can go many minutes between prints —
+# which combined with the old 60s recv timeout meant the listener spent its life
+# reconnecting and missed anything that landed mid-reconnect. One all-market connection
+# receives every liquidation on the venue, so the stream is continuously live and
+# liveness is provable; the payload's own symbol field is matched against the watchlist.
+STREAM_URL = "wss://fstream.binance.com/ws/!forceOrder@arr"
 VENUE = "binance"
 SOURCE_ID = "binance_futures"
+QUOTE_SUFFIX = "USDT"  # matches sources/base.default_usdt_symbols
 
 
 def _to_observation(instrument: str, msg: dict, cfg: Config) -> Observation | None:
@@ -61,28 +68,47 @@ def _to_observation(instrument: str, msg: dict, cfg: Config) -> Observation | No
     )
 
 
-async def listen_one(instrument: str, cfg: Config, *, stop_event: asyncio.Event) -> None:
-    """Runs until stop_event is set, reconnecting on any failure. Every failure is
-    recorded as a collector_event (feeds the Layer 6 source-reliability register)."""
-    symbol_lower = f"{instrument.upper()}USDT".lower()
-    url = STREAM_URL_TMPL.format(symbol_lower=symbol_lower)
+def instrument_for_symbol(symbol: str | None, watched: set[str]) -> str | None:
+    """Map a venue symbol from the all-market stream back to a watched instrument.
+    Only USDT-quoted symbols are accepted, so a coin-margined or alt-quoted contract on
+    the same stream is never silently attributed to the USDT instrument we track."""
+    if not symbol:
+        return None
+    symbol = symbol.upper()
+    if not symbol.endswith(QUOTE_SUFFIX):
+        return None
+    base = symbol[: -len(QUOTE_SUFFIX)]
+    return base if base in watched else None
+
+
+async def run_liquidation_listeners(instruments: list[str], cfg: Config, *, stop_event: asyncio.Event) -> None:
+    """Runs until stop_event is set, reconnecting with backoff on any failure. Every
+    failure is recorded as a collector_event (feeds the Layer 6 source-reliability
+    register). Silence is deliberately NOT treated as failure — connection liveness is
+    websockets' ping/pong job (ping_interval/ping_timeout below), whereas a gap in
+    liquidations is real information about the tape.
+    """
+    watched = {i.upper() for i in instruments}
     backoff = 1.0
     while not stop_event.is_set():
         try:
-            async with websockets.connect(url, ping_interval=20, ping_timeout=20) as ws:
+            async with websockets.connect(STREAM_URL, ping_interval=20, ping_timeout=20) as ws:
                 backoff = 1.0
+                logger.info("liquidation stream connected, watching %s", sorted(watched))
                 while not stop_event.is_set():
-                    raw = await asyncio.wait_for(ws.recv(), timeout=60)
+                    raw = await ws.recv()
                     msg = json.loads(raw)
+                    instrument = instrument_for_symbol((msg.get("o") or {}).get("s"), watched)
+                    if instrument is None:
+                        continue
                     obs = _to_observation(instrument, msg, cfg)
                     if obs is None:
                         continue
                     with db.get_connection() as conn:
                         db.insert_observation(conn, obs)
-        except asyncio.TimeoutError:
-            continue
+                        db.record_source_success(conn, SOURCE_ID)
         except Exception as exc:  # noqa: BLE001 - reconnect on anything, this is a long-lived loop
-            logger.warning("liquidation stream for %s dropped: %s", instrument, exc)
+            logger.warning("liquidation stream dropped: %s", exc)
             with db.get_connection() as conn:
                 db.record_collector_event(
                     conn, source_id=SOURCE_ID, venue=VENUE, event_type="ws_disconnect", detail=str(exc)
@@ -90,13 +116,3 @@ async def listen_one(instrument: str, cfg: Config, *, stop_event: asyncio.Event)
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(stop_event.wait(), timeout=backoff)
             backoff = min(backoff * 2, 60.0)
-
-
-async def run_liquidation_listeners(instruments: list[str], cfg: Config, *, stop_event: asyncio.Event) -> None:
-    tasks = [asyncio.create_task(listen_one(i, cfg, stop_event=stop_event)) for i in instruments]
-    try:
-        await stop_event.wait()
-    finally:
-        for t in tasks:
-            t.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
