@@ -1,9 +1,9 @@
-"""One-time backfill of daily price history from Binance's public futures klines
-endpoint, so realised_vol_in_band (doctrine 2.1 / Gate U condition 6 — needs ~30 days of
-single-venue daily closes, see backend/compute/volatility.py) doesn't have to wait a
-month after a fresh collector start. This is real historical exchange data, fetched in
-bulk after the fact rather than waited for one poll at a time — not a synthetic or
-inferred value, and not a threshold change.
+"""One-time backfill of price history from Binance's public futures klines endpoint, so
+realised_vol_in_band (Gate U condition 6 — needs ~30 days of single-venue daily closes)
+and regime classification (Layer 2.1 — needs enough 4h bars to confirm swing structure)
+don't have to wait a month after a fresh collector start. This is real historical
+exchange data, fetched in bulk after the fact rather than waited for one poll at a time —
+not a synthetic or inferred value, and not a threshold change.
 
 Written under a distinct source_id (binance_futures_backfill) rather than
 binance_futures, so a report's data-integrity section can always tell backfilled history
@@ -29,6 +29,18 @@ VENUE = "binance"
 SOURCE_ID = "binance_futures_backfill"
 DAYS = 35
 
+# 4h rather than 1d, because two different consumers read this series and only one of
+# them is satisfied by daily closes. compute/volatility.daily_closes() collapses whatever
+# it is given to one value per UTC day, so realised vol works either way — but
+# compute/regime.classify() resamples to swing_timeframe (4h) and needs 2*swing_lookback
+# +2 bars with enough local extrema to find n_swings_required swings. Backfilled daily
+# closes resampled to 4h produced 32 sparse bars yielding a single confirmed swing low
+# against the 3 required, so BTC and ETH classified UNDETERMINED — which blocks every
+# setup — despite both satisfying the trend's volatility and direction conditions.
+INTERVAL = "4h"
+BARS_PER_DAY = 6
+LIMIT = DAYS * BARS_PER_DAY
+
 
 def _existing_backfill_count(conn, instrument: str) -> int:
     row = conn.execute(
@@ -43,13 +55,13 @@ def backfill(instrument: str, cfg: Config, *, client: httpx.Client) -> int:
     sym = default_usdt_symbols(instrument)
 
     with db.get_connection() as conn:
-        if _existing_backfill_count(conn, instrument) >= DAYS:
+        if _existing_backfill_count(conn, instrument) >= LIMIT:
             return 0
 
     try:
         resp = client.get(
             f"{FUTURES_BASE}/fapi/v1/klines",
-            params={"symbol": sym.futures, "interval": "1d", "limit": DAYS},
+            params={"symbol": sym.futures, "interval": INTERVAL, "limit": LIMIT},
             timeout=10.0,
         )
         resp.raise_for_status()
@@ -97,7 +109,7 @@ def main() -> None:
             if n == 0:
                 print(f"{symbol.upper()}: already backfilled, skipped")
             else:
-                print(f"{symbol.upper()}: inserted {n} historical daily closes")
+                print(f"{symbol.upper()}: inserted {n} historical {INTERVAL} closes")
 
 
 if __name__ == "__main__":

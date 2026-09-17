@@ -174,7 +174,7 @@ async def main() -> None:
                 logger.info("collector: history backfill failed for %s: %s", sym, exc)
                 continue
             if n:
-                logger.info("collector: backfilled %d historical daily closes for %s", n, sym)
+                logger.info("collector: backfilled %d historical closes for %s", n, sym)
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
