@@ -21,8 +21,10 @@ from backend.replay.source import LiveSource
 from backend.report.contract import persist_report, run_analysis
 from backend.report.exit_monitor import evaluate_exit
 from backend.report.render import render_text
+from backend.scripts import backfill_history
 from backend.service import auth
 from backend.service.collector import collect_once
+from backend.sources.base import SourceError
 from backend.store import db
 
 app = FastAPI(title="TradeSafe evidence API", version="1.0")
@@ -102,6 +104,14 @@ async def add_instrument(symbol: str):
     cfg = load_config()
     async with httpx.AsyncClient() as client:
         await collect_once(symbol, cfg, client=client)
+    # Also backfill daily price history so realised_vol_in_band (needs ~30 days of
+    # single-venue closes) doesn't leave a first-time lookup waiting a month — see
+    # backend/scripts/backfill_history.py.
+    with httpx.Client() as backfill_client:
+        try:
+            await asyncio.to_thread(backfill_history.backfill, symbol, cfg, client=backfill_client)
+        except SourceError:
+            pass
     return {"ok": True, "instrument": symbol}
 
 

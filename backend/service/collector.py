@@ -15,6 +15,7 @@ import signal
 import httpx
 
 from backend.core.config import Config, load_config
+from backend.scripts import backfill_history
 from backend.sources import binance, bybit, chain, coinbase, hyperliquid, issuer, kraken, okx
 from backend.sources.base import SourceError
 from backend.sources.liquidations import run_liquidation_listeners
@@ -117,6 +118,21 @@ async def main() -> None:
             # the API adds any instrument a user actually looks up to this list too.
             for sym in ("BTC", "ETH"):
                 db.add_watched_instrument(conn, sym)
+        instruments = db.list_watched_instruments(conn)
+
+    # One-off per instrument, and cheap to repeat on every restart (backfill() checks
+    # existing row counts before making a network call) — see backfill_history's
+    # docstring for why this can't just be "wait a month" on a fresh deployment.
+    cfg = load_config()
+    with httpx.Client() as backfill_client:
+        for sym in instruments:
+            try:
+                n = backfill_history.backfill(sym, cfg, client=backfill_client)
+            except SourceError as exc:
+                logger.info("collector: history backfill failed for %s: %s", sym, exc)
+                continue
+            if n:
+                logger.info("collector: backfilled %d historical daily closes for %s", n, sym)
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
