@@ -37,12 +37,32 @@ _FETCHERS = [
     ("issuer", issuer.fetch),
 ]
 
+# The subset polled on the fast loop below, to keep PRICE (30s half-life) and
+# ORDER_BOOK_DEPTH (15s) inside their own expiry windows — the full loop's 60s cadence
+# is slower than those metrics decay, which left spot_depth_sufficient reading `unknown`
+# on most on-demand reports (doctrine 0.2 expiry is a property of the market, so the
+# cadence is what has to move, not the half-life). These three venues carry both metrics
+# and have rate limits generous enough for it; CoinGecko/Kraken deliberately stay on the
+# slow loop, where their tighter limits are not a problem.
+_FAST_FETCHERS = [
+    ("binance", binance.fetch),
+    ("bybit", bybit.fetch),
+    ("okx", okx.fetch),
+]
+
 POLL_INTERVAL_SECONDS = 60
+FAST_POLL_INTERVAL_SECONDS = 10
 LIQUIDATION_SUPPORTED_VENUES = {"binance"}  # see sources/liquidations.py
 
 
-async def collect_once(instrument: str, cfg: Config, *, client: httpx.AsyncClient) -> None:
-    for label, fetch_fn in _FETCHERS:
+async def collect_once(
+    instrument: str,
+    cfg: Config,
+    *,
+    client: httpx.AsyncClient,
+    fetchers: list | None = None,
+) -> None:
+    for label, fetch_fn in fetchers if fetchers is not None else _FETCHERS:
         try:
             observations = await fetch_fn(instrument, cfg, client=client)
         except SourceError as exc:
@@ -76,6 +96,28 @@ async def poll_loop(stop_event: asyncio.Event) -> None:
                 await collect_once(instrument, cfg, client=client)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=POLL_INTERVAL_SECONDS)
+            except asyncio.TimeoutError:
+                pass
+
+
+async def fast_poll_loop(stop_event: asyncio.Event) -> None:
+    """Keeps the short-half-life metrics fresh. Instruments are fetched concurrently
+    rather than in sequence so one cycle finishes well inside ORDER_BOOK_DEPTH's 15s
+    expiry even with a full watchlist — done sequentially the cycle alone would outlast
+    the window it exists to stay inside."""
+    cfg = load_config()
+    async with httpx.AsyncClient() as client:
+        while not stop_event.is_set():
+            with db.get_connection() as conn:
+                instruments = db.list_watched_instruments(conn)
+            await asyncio.gather(
+                *(
+                    collect_once(instrument, cfg, client=client, fetchers=_FAST_FETCHERS)
+                    for instrument in instruments
+                )
+            )
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=FAST_POLL_INTERVAL_SECONDS)
             except asyncio.TimeoutError:
                 pass
 
@@ -140,7 +182,11 @@ async def main() -> None:
         with contextlib_suppress():
             loop.add_signal_handler(sig, stop_event.set)
 
-    await asyncio.gather(poll_loop(stop_event), liquidation_supervisor(stop_event))
+    await asyncio.gather(
+        poll_loop(stop_event),
+        fast_poll_loop(stop_event),
+        liquidation_supervisor(stop_event),
+    )
 
 
 class contextlib_suppress:

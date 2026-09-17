@@ -95,7 +95,20 @@ continuation:
 # Gate U ceilings — see backend/config/universe.yaml for the per-check definitions;
 # duplicated key names here so calibration sweep can vary them in one place.
 gate_u:
-  perp_spot_ratio_ceiling: 3.0
+  # CALIBRATED 2026-09-18 from measurement, unlike its neighbours here. The previous
+  # placeholder of 3.0 had a 0% pass rate: measured daily perp/spot base-volume ratios
+  # over the preceding 30 days never once fell below it —
+  #   BTC  min 5.05  median  9.83  max 12.10
+  #   ETH  min 8.70  median 12.06  max 13.78
+  #   SOL  min 5.37  median  7.86  max  9.52
+  #   ZEC  min 4.35  median  7.66  max  9.76
+  # 3.0 therefore rejected every liquid instrument including the deepest spot market in
+  # the asset class, which is not what "price discovery must not sit entirely in
+  # derivatives" is meant to catch. 20.0 sits ~45% above the highest observed value, so
+  # a healthy major passes even on an unusual day, while genuinely perp-dominated
+  # tokens (30x+) still fail. Re-measure if the venue set in sources/ changes, since
+  # adding spot venues lowers the ratio by raising the denominator.
+  perp_spot_ratio_ceiling: 20.0
   oi_to_mcap_ceiling: 0.15
   min_spot_depth_multiple: 20   # resting liquidity at entry zone must be >= N x intended size
   rv_band_min: 0.20

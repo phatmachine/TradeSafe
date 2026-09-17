@@ -94,6 +94,22 @@ def list_instruments():
         return {"instruments": db.list_watched_instruments(conn)}
 
 
+def _bootstrap_history(symbol: str, cfg) -> None:
+    """Backfill daily price history for a symbol if it has none yet, so
+    realised_vol_in_band (which needs ~30 days of single-venue closes) isn't left
+    unknown on a first-time lookup. Must be called from every entry point a symbol can
+    first arrive through — the frontend analyses by calling GET /api/report/{symbol}
+    directly and never touches POST /api/instruments/{symbol}, so wiring this only into
+    the latter left first-time lookups waiting for a collector restart. backfill()
+    checks stored row counts before making any network call, so repeat calls are a
+    single COUNT query."""
+    with httpx.Client() as client:
+        try:
+            backfill_history.backfill(symbol, cfg, client=client)
+        except SourceError:
+            pass
+
+
 @app.post("/api/instruments/{symbol}", dependencies=[Depends(require_auth)])
 async def add_instrument(symbol: str):
     symbol = symbol.upper()
@@ -104,14 +120,7 @@ async def add_instrument(symbol: str):
     cfg = load_config()
     async with httpx.AsyncClient() as client:
         await collect_once(symbol, cfg, client=client)
-    # Also backfill daily price history so realised_vol_in_band (needs ~30 days of
-    # single-venue closes) doesn't leave a first-time lookup waiting a month — see
-    # backend/scripts/backfill_history.py.
-    with httpx.Client() as backfill_client:
-        try:
-            await asyncio.to_thread(backfill_history.backfill, symbol, cfg, client=backfill_client)
-        except SourceError:
-            pass
+    await asyncio.to_thread(_bootstrap_history, symbol, cfg)
     return {"ok": True, "instrument": symbol}
 
 
@@ -126,6 +135,7 @@ def remove_instrument(symbol: str):
 def get_report(symbol: str):
     symbol = symbol.upper()
     cfg = load_config()
+    _bootstrap_history(symbol, cfg)
     with db.get_connection() as conn:
         registry = SourceRegistry.from_config(cfg, db.get_all_source_state(conn))
         ds = LiveSource(conn)
@@ -139,6 +149,7 @@ def get_report(symbol: str):
 def get_report_text(symbol: str):
     symbol = symbol.upper()
     cfg = load_config()
+    _bootstrap_history(symbol, cfg)
     with db.get_connection() as conn:
         registry = SourceRegistry.from_config(cfg, db.get_all_source_state(conn))
         ds = LiveSource(conn)
