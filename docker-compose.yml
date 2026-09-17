@@ -1,40 +1,63 @@
+# Deploys TradeSafe behind an existing Traefik reverse proxy (e.g. Hostinger's "Ubuntu
+# 24.04 with Docker and Traefik" VPS template). Traefik discovers this stack via the
+# `traefik.*` labels on `web` and the shared `traefik-proxy` external network; nothing
+# here binds a host port — Traefik terminates TLS and forwards decrypted HTTP to `web`
+# over that network.
+#
+# For a standalone box with no reverse proxy already running (Caddy provisions its own
+# TLS and binds 80/443 directly), use deploy/docker-compose.standalone.yml instead — see
+# deploy/README.md.
+
 services:
   collector:
     build:
       context: .
       dockerfile: deploy/Dockerfile.backend
     command: ["python", "-m", "backend.service.collector"]
-    env_file: deploy/.env
+    env_file: .env
     volumes:
       - tradesafe_data:/data
     restart: unless-stopped
+    networks:
+      - internal
 
   api:
     build:
       context: .
       dockerfile: deploy/Dockerfile.backend
     command: ["uvicorn", "backend.service.api:app", "--host", "0.0.0.0", "--port", "8000"]
-    env_file: deploy/.env
+    env_file: .env
     volumes:
       - tradesafe_data:/data
     restart: unless-stopped
+    networks:
+      - internal
 
   web:
     build:
       context: .
-      dockerfile: deploy/Dockerfile.web
-    env_file: deploy/.env
-    ports:
-      - "80:80"
-      - "443:443"
+      dockerfile: deploy/Dockerfile.web.traefik
+    env_file: .env
     depends_on:
       - api
-    volumes:
-      - caddy_data:/data
-      - caddy_config:/config
     restart: unless-stopped
+    expose:
+      - "80"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.tradesafe.rule=Host(`tradesafe.srv1612559.hstgr.cloud`)
+      - traefik.http.routers.tradesafe.entrypoints=websecure
+      - traefik.http.routers.tradesafe.tls.certresolver=letsencrypt
+      - traefik.http.services.tradesafe.loadbalancer.server.port=80
+    networks:
+      - traefik-proxy
+      - internal
+
+networks:
+  traefik-proxy:
+    external: true
+  internal:
+    driver: bridge
 
 volumes:
   tradesafe_data:
-  caddy_data:
-  caddy_config:

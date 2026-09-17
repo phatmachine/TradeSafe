@@ -1,0 +1,40 @@
+services:
+  collector:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.backend
+    command: ["python", "-m", "backend.service.collector"]
+    env_file: deploy/.env
+    volumes:
+      - tradesafe_data:/data
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.backend
+    command: ["uvicorn", "backend.service.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    env_file: deploy/.env
+    volumes:
+      - tradesafe_data:/data
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.web
+    env_file: deploy/.env
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - api
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  tradesafe_data:
+  caddy_data:
+  caddy_config:
