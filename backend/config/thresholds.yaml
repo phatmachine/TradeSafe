@@ -1,0 +1,112 @@
+# Doctrine thresholds. Every value here is an "open item" from the doctrine appendix
+# until it has been run through backend/replay/sweep.py against real history and chosen
+# on a stability plateau (see docs/doctrine-summary.md, "Validation posture").
+#
+# A report computed from this file is always labelled with the sha256 of this file's
+# contents (config_hash), so nobody can compare two verdicts produced under different
+# thresholds without that being visible.
+#
+# validated: false means "placeholder, not yet calibrated" — the report will say so.
+
+meta:
+  validated: false
+  notes: >
+    Initial values are conservative starting points taken from worked examples in the
+    doctrine (ZEC log) and standard TA/quant conventions. Run the calibration sweep
+    before trusting a report for anything beyond exercising the pipeline.
+
+# 0.1 / Layer 1 — provenance & independence
+min_independent: 2          # distinct upstream_id sources required per decision metric
+
+# 0.2 — half-life expiry, in seconds
+expiry:
+  price_seconds: 30
+  order_book_seconds: 15
+  oi_funding_normal_seconds: 3600      # 1 hour
+  oi_funding_fast_tape_seconds: 900    # 15 minutes, when fast_tape_rv_threshold is hit
+  liquidation_seconds: 14400           # 4 hours
+  etf_flow_seconds: 86400              # 1 day
+  supply_float_seconds: 604800         # 1 week
+  event_calendar_seconds: 604800
+
+# 0.2 — fast-tape switch: realised vol (rv_short, annualised) above this flips OI/funding
+# expiry from the 1-hour default to the 15-minute one.
+fast_tape_rv_threshold: 1.0   # 100% annualised realised vol
+
+# 0.4 / 0.8 — cross-venue dispersion tolerance: (max - min) / median, per metric.
+# Above this the metric is flagged and, for decision-path metrics, the run fails closed.
+max_dispersion:
+  price: 0.02
+  funding_8h: 0.5
+  oi_coin: 0.15
+
+# 0.5 — synthetic-content / coherence tolerance for a single source's internally
+# derived fields (e.g. its own OI-in-USD vs OI-in-coins * its own price)
+coherence_tol: 0.03
+
+# Never compute a ratio from observations more than this far apart in observed_at.
+sync_tolerance_seconds: 120
+
+# realised volatility windows, in days, for the annualised stdev-of-log-returns calc
+rv_short_days: 7
+rv_long_days: 30
+
+# 2.1 — regime classification
+trend_window_days: 21
+trend_ratio_max: 0.7     # rv_short / rv_long must be below this for "trending"
+n_swings_required: 3
+swing_lookback_bars: 5
+swing_timeframe: "4h"
+hl_margin_pct: 0.01      # a swing low must exceed the prior swing low by at least this
+
+# 2.2 — trapped cohort
+liq_window_hours: 72
+liq_min_consistent_periods: 3
+
+# 2.3 / cost model — carry materiality
+atr_n: 14
+carry_ratio_material: 0.15     # carry / expected-move ATR fraction considered "material"
+carry_ratio_decline: 0.33      # above this, decline the trade regardless of setup quality
+expected_hold_days_default: 10
+
+# Layer 3 setup parameters
+cascade:
+  flush_oi_pct: 0.12          # required coin-OI drop from its window peak
+  flush_window_hours: 48
+  flush_hold_periods: 3       # consecutive polling periods the decline must hold
+  flush_range_pct: 0.03       # price range contraction threshold (of price) post-flush
+  stab_periods: 3             # consecutive closes required above the flush-wick low
+  spent_band_pct: 0.05        # "premise spent": coin OI back within this band of pre-flush level
+  liquidation_quiet_minutes: 60  # "liquidation print settled": no fresh prints inside this window
+  bar_seconds: 900             # bar size used for OI-series / flush-bar detection (15 min)
+
+# Layer 0 measurement rule: OI-weighted funding at or below zero for this many
+# consecutive polling periods counts as "funding reset/normalised".
+funding_periods: 3
+
+exhaustion:
+  # uses carry_ratio_material, plus:
+  structural_break_lookback_bars: 20
+
+continuation:
+  retrace_min_pct: 0.15
+  retrace_max_pct: 0.25
+
+# Gate U ceilings — see backend/config/universe.yaml for the per-check definitions;
+# duplicated key names here so calibration sweep can vary them in one place.
+gate_u:
+  perp_spot_ratio_ceiling: 3.0
+  oi_to_mcap_ceiling: 0.15
+  min_spot_depth_multiple: 20   # resting liquidity at entry zone must be >= N x intended size
+  rv_band_min: 0.20
+  rv_band_max: 3.0
+  order_book_band_pct: 0.01     # +/- 1% of mid price counts as "the entry zone"
+  reference_intended_size_coins: 1.0   # placeholder notional the depth check sizes against;
+                                        # replace with your real intended trade size
+
+# Exit-monitoring windows, per setup, in days — the time-stop keys off this.
+expected_hold_window_days:
+  cascade_absorption: 10
+  positioning_exhaustion: 14
+  event_decompression: 5
+  trend_continuation_leverage_reset: 14

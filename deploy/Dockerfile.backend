@@ -1,0 +1,20 @@
+# Shared image for both the always-on collector and the on-demand analysis API — they
+# are the same codebase with a different CMD (implementation spec, "Two services, two
+# lifecycles"). Kept deliberately minimal: no exchange credentials are ever baked in or
+# passed to this image, because every required source is a public endpoint.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY backend/requirements.txt ./backend/requirements.txt
+RUN pip install --no-cache-dir -r backend/requirements.txt
+
+COPY backend/ ./backend/
+
+ENV PYTHONUNBUFFERED=1
+ENV TRADESAFE_DB_PATH=/data/records.db
+
+VOLUME ["/data"]
+
+# Overridden per-service in docker-compose.yml.
+CMD ["python", "-m", "backend.service.collector"]

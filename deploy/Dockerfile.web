@@ -1,0 +1,14 @@
+# Builds the mobile-first web app, then serves it (and reverse-proxies the API) through
+# Caddy, which gets you automatic HTTPS for free once DOMAIN points at this host — see
+# deploy/README.md. This container is the whole ingress: it's the only one that needs a
+# public port.
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY web/package.json web/package-lock.json* ./
+RUN npm install
+COPY web/ ./
+RUN npm run build
+
+FROM caddy:2-alpine
+COPY --from=build /app/dist /srv
+COPY deploy/Caddyfile /etc/caddy/Caddyfile

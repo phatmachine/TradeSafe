@@ -1,0 +1,36 @@
+# Gate U instrument universe. Reviewed on a fixed cadence (see `review_cadence_days`),
+# never changed intraday, and never bypassed for a named/requested instrument — every
+# symbol the API is asked about runs through gate_u.py identically, whether it came from
+# a screen or from someone typing it into the app.
+
+review_cadence_days: 14
+
+# Venues consulted for spot depth / perp-spot ratio / OI-to-cap on any instrument.
+required_venues:
+  - binance
+  - bybit
+  - okx
+  - hyperliquid
+
+# Minimum number of the above venues that must return T1 data for Gate U to be
+# evaluable at all. Fewer than this -> gate_u fails closed with UNKNOWN, not a partial
+# pass.
+min_venues_reporting: 2
+
+# Chains this deployment currently has a T1 (own-node/indexer) or well-supported T2
+# (public block explorer) free-float source for. An instrument on a chain not listed
+# here will fail Gate U condition 5 (free float computable) until a source is added —
+# that is correct fail-closed behaviour, not a bug.
+supported_chains:
+  - ethereum
+  - bitcoin
+  - solana
+  - arbitrum
+  - base
+  - polygon
+  - bsc
+
+# Instruments explicitly disqualified regardless of what they screen as, with the
+# reason recorded (doctrine: "the underlying record lives in the appendix, never in a
+# rule" — this list is evidence, not policy, and is reviewed every cycle).
+manual_exclusions: []
