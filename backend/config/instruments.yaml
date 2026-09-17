@@ -12,14 +12,22 @@ instruments:
   BTC:
     chain: bitcoin
     native: true          # no contract call possible; float comes from CoinGecko T2 only
+    coingecko_id: bitcoin # CoinGecko's coin id != the ticker; the fetch 404s without this
 
   ETH:
     chain: ethereum
     native: true
+    coingecko_id: ethereum
 
   SOL:
     chain: solana
     native: true
+    coingecko_id: solana
+
+  ZEC:
+    chain: zcash
+    native: true
+    coingecko_id: zcash
 
   # Example ERC-20 wiring — replace with real instruments as the universe is defined.
   # UNI:
