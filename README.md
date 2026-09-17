@@ -1,5 +1,7 @@
 # TradeSafe
 
+*Localised trade analysis.*
+
 A mobile-first evidence-analysis app for crypto perpetual futures. You name an
 instrument; it runs that instrument through a deterministic, adversarial-market data
 pipeline and returns an honest report of what the data supports, what it does not, which
