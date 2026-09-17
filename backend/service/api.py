@@ -155,6 +155,7 @@ def get_report_text(symbol: str):
         ds = LiveSource(conn)
         report = run_analysis(symbol, ds, cfg, registry)
         persist_report(conn, report)
+        db.add_watched_instrument(conn, symbol)
     return Response(content=render_text(report), media_type="text/plain")
 
 

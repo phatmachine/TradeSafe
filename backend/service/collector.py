@@ -9,6 +9,7 @@ back.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import signal
 
@@ -135,8 +136,15 @@ async def liquidation_supervisor(stop_event: asyncio.Event) -> None:
             instruments = frozenset(db.list_watched_instruments(conn))
         if instruments != current_set:
             if current_task is not None:
+                # Cancel rather than only signalling: the listener spends almost all its
+                # time awaiting the next frame, and an Event it can only check between
+                # frames would leave this await hanging until the venue happened to send
+                # one — which on a quiet tape is indefinitely, so the watchlist change
+                # would never reach the stream.
                 inner_stop.set()
-                await current_task
+                current_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await current_task
             inner_stop = asyncio.Event()
             current_set = instruments
             if instruments:
