@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# The store is generated at runtime, per deployment — never committed.
+backend/store/*.db
+backend/store/*.db-journal
+
+# Frontend
+web/node_modules/
+web/dist/
+web/tsconfig.tsbuildinfo
+
+# Secrets
+deploy/.env
+.env
+
+# OS/editor
+.DS_Store
+.pytest_cache/

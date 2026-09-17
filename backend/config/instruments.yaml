@@ -1,0 +1,30 @@
+# Per-instrument metadata that cannot be derived from a venue API: which chain an
+# instrument lives on, an ERC-20-style contract address for a generic EVM totalSupply()
+# call (T1, chain_rpc), and an optional issuer holdings endpoint for ETF/fund flows.
+#
+# An instrument with no entry here still runs through Gate U — it just fails condition 5
+# (free float computable) unless CoinGecko's T2 supply figure is independently
+# cross-confirmed by a second source, which by default it is not. That is fail-closed
+# behaviour by design (implementation spec, "No inference to fill gaps"), not a bug: add
+# an entry here to extend real coverage rather than loosening the gate.
+
+instruments:
+  BTC:
+    chain: bitcoin
+    native: true          # no contract call possible; float comes from CoinGecko T2 only
+
+  ETH:
+    chain: ethereum
+    native: true
+
+  SOL:
+    chain: solana
+    native: true
+
+  # Example ERC-20 wiring — replace with real instruments as the universe is defined.
+  # UNI:
+  #   chain: ethereum
+  #   contract_address: "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984"
+  #   rpc_url: "https://eth.llamarpc.com"
+  #   decimals: 18
+  #   holdings_url: null   # issuer daily-holdings endpoint, if an ETF/fund wrapper exists

@@ -1,0 +1,93 @@
+# SourceRegistry seed data. independence (0.3) is asserted here explicitly at
+# registration — never inferred from a domain name. Sources sharing an upstream_id
+# count as ONE source for {min_independent} purposes.
+#
+# reliability_prior and demoted_at are NOT set here — they live in the database and are
+# maintained by the Layer 6 audit loop (backend/compute/source_scoring.py). This file is
+# only the static registration: what a source is and how it collects.
+
+sources:
+  - source_id: binance_futures
+    name: "Binance USD-M Futures public API"
+    upstream_id: binance
+    collection_method: venue_api
+    tier: T1
+    metrics: [price, funding_8h, oi_coin, oi_usd, perp_volume, liquidations, order_book]
+
+  - source_id: binance_spot
+    name: "Binance Spot public API"
+    upstream_id: binance
+    collection_method: venue_api
+    tier: T1
+    metrics: [price, spot_volume, order_book]
+
+  - source_id: bybit_futures
+    name: "Bybit derivatives public API"
+    upstream_id: bybit
+    collection_method: venue_api
+    tier: T1
+    metrics: [price, funding_8h, oi_coin, oi_usd, perp_volume, liquidations, order_book]
+
+  - source_id: bybit_spot
+    name: "Bybit spot public API"
+    upstream_id: bybit
+    collection_method: venue_api
+    tier: T1
+    metrics: [price, spot_volume, order_book]
+
+  - source_id: okx_futures
+    name: "OKX public API (SWAP)"
+    upstream_id: okx
+    collection_method: venue_api
+    tier: T1
+    metrics: [price, funding_8h, oi_coin, oi_usd, perp_volume, liquidations, order_book]
+
+  - source_id: okx_spot
+    name: "OKX public API (SPOT)"
+    upstream_id: okx
+    collection_method: venue_api
+    tier: T1
+    metrics: [price, spot_volume, order_book]
+
+  - source_id: hyperliquid
+    name: "Hyperliquid public API"
+    upstream_id: hyperliquid
+    collection_method: venue_api
+    tier: T1
+    metrics: [price, funding_8h, oi_coin, perp_volume, liquidations, order_book]
+
+  - source_id: chain_evm_generic
+    name: "Generic EVM RPC / explorer (per-chain endpoint configured at runtime)"
+    upstream_id: chain_rpc
+    collection_method: chain_rpc
+    tier: T1
+    metrics: [supply_total, supply_locked, supply_staked]
+
+  - source_id: coingecko
+    name: "CoinGecko public API"
+    upstream_id: coingecko
+    collection_method: scrape
+    tier: T2
+    metrics: [supply_circulating, market_cap, price]
+    note: >
+      Aggregates self-reported and on-chain data; used only as a cross-check per 0.3,
+      never as the sole free-float source. Never used to satisfy tier_sufficiency alone.
+
+  # Optional / disabled by default per implementation-spec "Spend nothing until
+  # calibration" — flip enabled: true only once a specific gap appears in the sweep.
+  - source_id: coinglass
+    name: "Coinglass aggregated OI/funding/liquidation maps"
+    upstream_id: coinglass
+    collection_method: scrape
+    tier: T2
+    enabled: false
+    metrics: [oi_usd, funding_8h, liquidations]
+    note: "Liquidation totals are throttled samples (doctrine, Measurement rules)."
+
+  - source_id: velo
+    name: "Velo Data free aggregate"
+    upstream_id: velo
+    collection_method: scrape
+    tier: T2
+    enabled: false
+    metrics: [oi_usd, funding_8h, perp_volume]
