@@ -68,6 +68,36 @@ def _distance_to_flip(gate: GateResult) -> list[dict]:
     return out
 
 
+def _structural_read(setup_name: str, cohort: cohort_mod.Cohort) -> str:
+    """A stated-as-fact, non-imperative read of which side a qualifying setup's own
+    evidence points toward — never "buy"/"sell", only what the setup + trapped-cohort
+    classification together already say. Two of the four setups don't encode a
+    direction at all (positioning_exhaustion, event_decompression); this says so
+    honestly rather than guessing one to fill the gap."""
+    if setup_name == cascade.SETUP_NAME:
+        if cohort == cohort_mod.Cohort.TRAPPED_LONGS:
+            return (
+                "Long — forced-selling cascade absorbed; the trapped_longs cohort finished "
+                "capitulating (doctrine: enter only after a cohort is confirmed destroyed)."
+            )
+        return (
+            f"Not determinable — this setup's own conditions describe a long-side "
+            f"forced-selling washout, but the trapped cohort came out {cohort.value}; "
+            "treat this as conflicting evidence, not a clean read."
+        )
+    if setup_name == continuation.SETUP_NAME:
+        return (
+            "Long — trend_continuation_leverage_reset only ever evaluates in a confirmed "
+            "uptrend (regime-gated in report/contract.py); no short equivalent exists in "
+            "this build."
+        )
+    return (
+        "Not determinable from this setup alone — it identifies exhausted or one-sided "
+        f"positioning but doesn't encode which way it resolves; pair trapped_cohort "
+        f"({cohort.value}) and regime with your own read of the market."
+    )
+
+
 @dataclass(frozen=True)
 class AnalysisReport:
     run_id: str
@@ -81,6 +111,7 @@ class AnalysisReport:
     state_classification: dict
     setup_evaluation: list[dict]
     distance_to_flip: list[dict]
+    structural_reads: list[dict]
 
     def to_dict(self) -> dict:
         return {
@@ -95,6 +126,7 @@ class AnalysisReport:
             "state_classification": self.state_classification,
             "setup_evaluation": self.setup_evaluation,
             "distance_to_flip": self.distance_to_flip,
+            "structural_reads": self.structural_reads,
         }
 
 
@@ -150,6 +182,7 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
             state_classification={},
             setup_evaluation=[],
             distance_to_flip=_distance_to_flip(gu),
+            structural_reads=[],
         )
 
     l0 = layer_0.evaluate(instrument, ds, cfg, registry)
@@ -166,6 +199,7 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
             state_classification={},
             setup_evaluation=[],
             distance_to_flip=_distance_to_flip(l0.gate_result),
+            structural_reads=[],
         )
 
     clean = l0.clean_observations
@@ -196,6 +230,7 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
             state_classification={"regime": regime_result.regime.value, "evidence": _jsonable(regime_result.evidence)},
             setup_evaluation=[],
             distance_to_flip=[],
+            structural_reads=[],
         )
 
     cohort_result = cohort_mod.classify(liq_hist, cfg=cfg)
@@ -288,12 +323,18 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
             state_classification=state_classification,
             setup_evaluation=[r.to_dict() for r in setup_results.values()],
             distance_to_flip=[],
+            structural_reads=[],
         )
 
     any_eligible = any(r.passed for r in setup_results.values())
     distance_to_flip = []
     for r in setup_results.values():
         distance_to_flip.extend(_distance_to_flip(r))
+    structural_reads = [
+        {"setup": name, "read": _structural_read(name, cohort_result.cohort)}
+        for name, r in setup_results.items()
+        if r.passed
+    ]
 
     return AnalysisReport(
         run_id=run_id,
@@ -305,6 +346,7 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
         gate_status=gate_status,
         data_integrity=data_integrity,
         state_classification=state_classification,
+        structural_reads=structural_reads,
         setup_evaluation=[r.to_dict() for r in setup_results.values()],
         distance_to_flip=distance_to_flip,
     )

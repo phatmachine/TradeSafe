@@ -98,6 +98,23 @@ export function ReportView({ report }: { report: AnalysisReport }) {
         </div>
       )}
 
+      {report.structural_reads.length > 0 && (
+        <div className="section">
+          <div className="section-title">Structural read</div>
+          <div className="card">
+            <div className="flip-detail" style={{ marginBottom: 10 }}>
+              Evidence from the qualifying setup and the trapped-cohort classification above — not a recommendation. You still decide entry, size, and direction.
+            </div>
+            {report.structural_reads.map((s, i) => (
+              <div className="flip-item" key={i}>
+                <div className="flip-title">{s.setup.replace(/_/g, " ")}</div>
+                <div className="flip-detail">{s.read}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {report.distance_to_flip.length > 0 && (
         <div className="section">
           <div className="section-title">Distance to flip</div>

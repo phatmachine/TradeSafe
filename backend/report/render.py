@@ -52,6 +52,11 @@ def render_text(report: AnalysisReport) -> str:
         for setup in d["setup_evaluation"]:
             lines.append(_render_gate(setup))
 
+    if d["structural_reads"]:
+        lines += ["", "-- Structural read (evidence, not a recommendation) --"]
+        for item in d["structural_reads"]:
+            lines.append(f"  [{item['setup']}] {item['read']}")
+
     if d["distance_to_flip"]:
         lines += ["", "-- Distance to flip --"]
         for item in d["distance_to_flip"]:

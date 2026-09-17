@@ -37,6 +37,11 @@ export interface StateClassification {
   constraint_ratios?: Record<string, string | null>;
 }
 
+export interface StructuralRead {
+  setup: string;
+  read: string;
+}
+
 export interface AnalysisReport {
   run_id: string;
   instrument: string;
@@ -49,6 +54,7 @@ export interface AnalysisReport {
   state_classification: StateClassification;
   setup_evaluation: GateResultJSON[];
   distance_to_flip: DistanceToFlipItem[];
+  structural_reads: StructuralRead[];
 }
 
 const BASE = "";
