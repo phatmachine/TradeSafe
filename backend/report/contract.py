@@ -71,25 +71,31 @@ def _distance_to_flip(gate: GateResult) -> list[dict]:
 def _structural_read(setup_name: str, cohort: cohort_mod.Cohort) -> dict:
     """A stated-as-fact, non-imperative read of which side a qualifying setup's own
     evidence points toward — never "buy"/"sell", only what the setup + trapped-cohort
-    classification together already say. `direction` is "long" | "short" | "unclear";
-    as coded today no setup's own conditions ever resolve to "short" (cascade_absorption
-    and trend_continuation_leverage_reset are both long-side only by construction — see
-    each module's docstring), which the caller surfaces rather than hides."""
-    if setup_name == cascade.SETUP_NAME:
-        if cohort == cohort_mod.Cohort.TRAPPED_LONGS:
+    classification together already say. `direction` is "long" | "short" | "unclear".
+    Each directional setup has a mirror: cascade/squeeze absorption (read together with
+    the trapped cohort, which must agree) and up/down trend continuation (regime-gated,
+    so the regime already fixes the side)."""
+    if setup_name in (cascade.SETUP_NAME, cascade.SHORT_SETUP_NAME):
+        is_long = setup_name == cascade.SETUP_NAME
+        expected = cohort_mod.Cohort.TRAPPED_LONGS if is_long else cohort_mod.Cohort.TRAPPED_SHORTS
+        if cohort == expected:
             return {
-                "direction": "long",
+                "direction": "long" if is_long else "short",
                 "read": (
                     "Long — forced-selling cascade absorbed; the trapped_longs cohort finished "
                     "capitulating (doctrine: enter only after a cohort is confirmed destroyed)."
+                    if is_long
+                    else "Short — forced-buying squeeze absorbed; the trapped_shorts cohort finished "
+                    "covering, so the buying that lifted price was forced and is now spent."
                 ),
             }
         return {
             "direction": "unclear",
             "read": (
-                f"Not determinable — this setup's own conditions describe a long-side "
-                f"forced-selling washout, but the trapped cohort came out {cohort.value}; "
-                "treat this as conflicting evidence, not a clean read."
+                f"Not determinable — this setup's own conditions describe a "
+                f"{'forced-selling washout of longs' if is_long else 'forced-buying squeeze of shorts'}, "
+                f"but the trapped cohort came out {cohort.value}; treat this as conflicting "
+                "evidence, not a clean read."
             ),
         }
     if setup_name == continuation.SETUP_NAME:
@@ -97,8 +103,17 @@ def _structural_read(setup_name: str, cohort: cohort_mod.Cohort) -> dict:
             "direction": "long",
             "read": (
                 "Long — trend_continuation_leverage_reset only ever evaluates in a confirmed "
-                "uptrend (regime-gated in report/contract.py); no short equivalent exists in "
-                "this build."
+                "uptrend (regime-gated in report/contract.py): a pullback that flushed leverage "
+                "without breaking the prior higher low."
+            ),
+        }
+    if setup_name == continuation.SHORT_SETUP_NAME:
+        return {
+            "direction": "short",
+            "read": (
+                "Short — downtrend_continuation_leverage_reset only ever evaluates in a confirmed "
+                "downtrend (regime-gated in report/contract.py): a rally that flushed leverage "
+                "without breaking the prior lower high."
             ),
         }
     return {
@@ -302,15 +317,17 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
 
     setup_results: dict[str, GateResult] = {}
     if regime_result.regime == regime_mod.Regime.MEAN_REVERTING:
-        setup_results[cascade.SETUP_NAME] = cascade.evaluate(
-            instrument,
-            oi_history=oi_hist,
-            price_history=price_hist_single_venue,
-            funding_history=funding_hist,
-            liquidation_history=liq_hist,
-            as_of=as_of,
-            cfg=cfg,
-        )
+        for side, name in (("long", cascade.SETUP_NAME), ("short", cascade.SHORT_SETUP_NAME)):
+            setup_results[name] = cascade.evaluate(
+                instrument,
+                oi_history=oi_hist,
+                price_history=price_hist_single_venue,
+                funding_history=funding_hist,
+                liquidation_history=liq_hist,
+                as_of=as_of,
+                cfg=cfg,
+                side=side,
+            )
         setup_results[exhaustion.SETUP_NAME] = exhaustion.evaluate(
             instrument,
             oi_history=oi_hist,
@@ -319,8 +336,13 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
             price_current=price_current,
             cfg=cfg,
         )
-    if regime_result.regime == regime_mod.Regime.TRENDING_UP:
-        setup_results[continuation.SETUP_NAME] = continuation.evaluate(
+    trend_side = {
+        regime_mod.Regime.TRENDING_UP: ("long", continuation.SETUP_NAME),
+        regime_mod.Regime.TRENDING_DOWN: ("short", continuation.SHORT_SETUP_NAME),
+    }.get(regime_result.regime)
+    if trend_side is not None:
+        side, name = trend_side
+        setup_results[name] = continuation.evaluate(
             instrument,
             oi_history=oi_hist,
             price_history=price_hist_single_venue,
@@ -328,21 +350,22 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
             perp_volume_current=perp_vol,
             spot_volume_current=spot_vol,
             cfg=cfg,
+            side=side,
         )
     setup_results[event.SETUP_NAME] = event.evaluate(
         instrument, event_history=event_hist, funding_history=funding_hist, as_of=as_of, cfg=cfg
     )
 
-    # Doctrine mutual exclusion: trend continuation and positioning exhaustion can never
-    # both qualify. The regime gate above already keeps them from being evaluated
-    # together in normal operation; this is the defensive check the doctrine asks for
-    # in case that gate is ever loosened.
-    if (
-        exhaustion.SETUP_NAME in setup_results
-        and continuation.SETUP_NAME in setup_results
-        and setup_results[exhaustion.SETUP_NAME].passed
-        and setup_results[continuation.SETUP_NAME].passed
-    ):
+    # Doctrine mutual exclusion: trend continuation (either direction) and positioning
+    # exhaustion can never both qualify. The regime gate above already keeps them from
+    # being evaluated together in normal operation; this is the defensive check the
+    # doctrine asks for in case that gate is ever loosened.
+    exhaustion_passed = exhaustion.SETUP_NAME in setup_results and setup_results[exhaustion.SETUP_NAME].passed
+    continuation_passed = any(
+        name in setup_results and setup_results[name].passed
+        for name in (continuation.SETUP_NAME, continuation.SHORT_SETUP_NAME)
+    )
+    if exhaustion_passed and continuation_passed:
         return AnalysisReport(
             run_id=run_id,
             instrument=instrument,

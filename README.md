@@ -97,10 +97,14 @@ once enough history has accumulated.
   event-decompression setup evaluates correctly against whatever `EVENT` observations
   exist, but will honestly report `unknown` until a real calendar source is registered —
   see `backend/sources/issuer.py` and `backend/setups/event.py`.
-- **Liquidation feeds are Binance-only** (`backend/sources/liquidations.py`) and are — by
-  the doctrine's own admission — throttled samples, not a census; cascade-absorption
-  detection is deliberately built on coin-denominated OI delta instead, per the doctrine's
-  substitution rule, not on liquidation totals.
+- **Liquidations come from a single venue in practice.** OKX is polled over REST
+  (`backend/sources/okx_liquidations.py`, ~24h backfilled on a cold start); Binance's
+  websocket listener (`backend/sources/liquidations.py`) also runs but websocket frames
+  don't flow in the current deployment environment. Either way these are — by the
+  doctrine's own admission — samples, not a census; cascade/squeeze detection is
+  deliberately built on coin-denominated OI delta, per the doctrine's substitution rule,
+  not on liquidation totals. The trapped-cohort classification needs activity in each of
+  three 24h buckets, so it stays `unnamed` for roughly the first two days of collection.
 - **OI-weighted funding is approximated as a simple cross-venue mean** pending
   calibration (doctrine 2.3 asks for OI-weighting specifically) — see the note in
   `backend/setups/cascade.py`.

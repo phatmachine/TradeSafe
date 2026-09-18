@@ -49,7 +49,7 @@ def resample_closes(observations: list[Observation], bucket_seconds: int) -> lis
     return [(b, buckets[b].value) for b in sorted(buckets)]
 
 
-def _timeframe_seconds(tf: str) -> int:
+def timeframe_seconds(tf: str) -> int:
     unit = tf[-1]
     n = int(tf[:-1])
     return {"m": 60, "h": 3600, "d": 86400}[unit] * n
@@ -88,7 +88,7 @@ def classify(
     """price_history must already be a single venue's series (caller's responsibility —
     never-mix-venues), pulled via the historical-series primitive so it is not filtered
     by current-state expiry (see replay/source.py)."""
-    tf_seconds = _timeframe_seconds(str(cfg.get("swing_timeframe", default="4h")))
+    tf_seconds = timeframe_seconds(str(cfg.get("swing_timeframe", default="4h")))
     lookback = int(cfg.get("swing_lookback_bars", default=5))
     n_swings_required = int(cfg.get("n_swings_required", default=3))
     hl_margin = Decimal(str(cfg.get("hl_margin_pct", default=0.01)))
@@ -163,3 +163,11 @@ def structural_higher_low(swing_lows: list[Decimal], margin_pct: Decimal) -> boo
     if len(swing_lows) < 2:
         return False
     return swing_lows[-1] >= swing_lows[-2] * (1 + margin_pct)
+
+
+def structural_lower_high(swing_highs: list[Decimal], margin_pct: Decimal) -> bool:
+    """Mirror of structural_higher_low for a downtrend: the most recent swing high sits
+    below the prior swing high by at least margin_pct."""
+    if len(swing_highs) < 2:
+        return False
+    return swing_highs[-1] <= swing_highs[-2] * (1 - margin_pct)

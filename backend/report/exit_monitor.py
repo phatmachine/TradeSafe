@@ -2,8 +2,8 @@
 recorded themselves (doctrine: "it reports; it does not close"). It re-evaluates, from
 fresh data, exactly three things: whether the named trapped cohort (2.2) still holds,
 whether the setup's expected-hold window has elapsed (the time stop), and — for cascade
-absorption specifically, where the doctrine gives an explicit formula — whether the
-premise is spent. Nothing here sizes, closes, or recommends anything.
+absorption and its squeeze mirror, where the doctrine gives an explicit formula — whether
+the premise is spent (coin OI rebuilt to within a band of its pre-flush level). Nothing here sizes, closes, or recommends anything.
 """
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def evaluate_exit(position: dict, ds: DataSource, cfg: Config) -> dict:
     time_stop_elapsed = hold_days_elapsed >= expected_window
 
     premise_spent = None
-    if setup == "cascade_absorption":
+    if setup in ("cascade_absorption", "squeeze_absorption"):
         bar_seconds = int(cfg.get("cascade", "bar_seconds", default=900))
         flush_window_hours = float(cfg.get("cascade", "flush_window_hours", default=48))
         spent_band = Decimal(str(cfg.get("cascade", "spent_band_pct", default=0.05)))

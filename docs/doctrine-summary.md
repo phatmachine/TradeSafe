@@ -98,7 +98,7 @@ substitutes for cascade-absorption confirmation.
   volume; carry cost vs expected move. Crowding is fragility only when carry is
   genuinely expensive relative to the move being faded.
 
-## Layer 3 — Permitted setups (exactly four; anything else is declined)
+## Layer 3 — Permitted setups (exactly six — four, plus mirrors of the two directional ones; anything else is declined)
 
 1. **Cascade absorption** — enter only after forced selling has *completed*: OI collapse
    confirmed and held, funding reset, liquidation print settled, price stabilising above
@@ -108,12 +108,22 @@ substitutes for cascade-absorption confirmation.
 3. **Event decompression** — a dated, primary-sourced event with verifiable one-sided
    positioning, traded after it resolves, never into it.
 4. **Trend continuation on leverage reset** — in a confirmed uptrend, buy the pullback
-   where all four hold: 15–25% retrace without breaking the prior higher low; coin OI
-   falls during the retrace; funding normalises to ≤0; spot volume holds up vs perp.
-   Invalidated by a close below the prior higher low with OI rising.
+   where all four hold: 15–25% retrace of the last swing leg without breaking the prior
+   higher low; coin OI falls during the retrace; funding normalises to ≤0; spot volume
+   holds up vs perp. Invalidated by a close below the prior higher low with OI rising.
+5. **Squeeze absorption** (mirror of 1, added 2026-09-18) — enter short only after forced
+   *buying* has completed: OI collapse confirmed and held, funding reset to ≥0,
+   liquidation print settled, price stabilising below the squeeze wick. Reads Short only
+   when the trapped cohort is `trapped_shorts`.
+6. **Downtrend continuation on leverage reset** (mirror of 4, added 2026-09-18) — in a
+   confirmed downtrend, sell the rally where all four hold: 15–25% retrace of the last
+   swing leg without breaking the prior lower high; coin OI falls during the rally;
+   funding normalises to ≥0; spot volume holds up vs perp. Invalidated by a close above
+   the prior lower high with OI rising.
 
-Trend continuation and positioning exhaustion can never both qualify — if both do, the
-regime classifier is wrong and the run reports `CLASSIFIER_CONFLICT`, not a trade.
+Trend continuation (either direction) and positioning exhaustion can never both qualify —
+if both do, the regime classifier is wrong and the run reports `CLASSIFIER_CONFLICT`, not
+a trade.
 
 ## Out of scope for this tool (by design)
 

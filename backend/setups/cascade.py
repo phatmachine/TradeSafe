@@ -4,15 +4,23 @@ price stabilising above the flush wick. Never anticipatory." The highest-convict
 setup because it requires no prediction, only the observation that a specific cohort has
 finished being destroyed.
 
+Squeeze absorption (added 2026-09-18) is the exact mirror, evaluated by the same function
+with side="short": forced BUYING has completed — OI collapse confirmed and held, funding
+reset to >= 0 (the short crowd that was paying has been destroyed), liquidation print
+settled, price stabilising BELOW the squeeze wick. A squeeze pushes price above where
+unforced participants value it just as a cascade pushes it below; once the forced buyers
+are gone, the same "no prediction, only observation" logic applies in the other direction.
+
 Never fires outside a mean-reverting (or undetermined-but-not-trending — see the
 mutual-exclusion note in setups/__init__.py) regime; the caller (report/contract.py) is
-responsible for the regime gate, this module only evaluates its own four conditions.
+responsible for the regime gate, this module only evaluates its own conditions.
 """
 from __future__ import annotations
 
 from datetime import timedelta
 from decimal import Decimal
 
+from backend.compute.funding import period_means
 from backend.compute.oi import aggregate_oi_series
 from backend.compute.regime import resample_closes
 from backend.core.config import Config
@@ -20,6 +28,7 @@ from backend.core.observation import Metric, Observation
 from backend.gates.common import ConditionResult, GateResult
 
 SETUP_NAME = "cascade_absorption"
+SHORT_SETUP_NAME = "squeeze_absorption"
 
 
 def evaluate(
@@ -31,7 +40,11 @@ def evaluate(
     liquidation_history: list[Observation],
     as_of,
     cfg: Config,
+    side: str = "long",
 ) -> GateResult:
+    if side not in ("long", "short"):
+        raise ValueError(f"side must be 'long' or 'short', not {side!r}")
+    is_long = side == "long"
     bar_seconds = int(cfg.get("cascade", "bar_seconds", default=900))
     flush_window_hours = float(cfg.get("cascade", "flush_window_hours", default=48))
     flush_oi_pct = Decimal(str(cfg.get("cascade", "flush_oi_pct", default=0.12)))
@@ -88,7 +101,7 @@ def evaluate(
         )
         conditions.append(
             ConditionResult(
-                name="price_stabilising_above_flush_wick",
+                name="price_stabilising_above_flush_wick" if is_long else "price_stabilising_below_squeeze_wick",
                 status="unknown",
                 computed_value=None,
                 threshold=stab_periods,
@@ -107,44 +120,48 @@ def evaluate(
                 detail="price range over the recent window as a fraction of last close",
             )
         )
-        flush_wick_low = min(closes[-(flush_hold_periods + stab_periods) : -stab_periods])
+        flush_window = closes[-(flush_hold_periods + stab_periods) : -stab_periods]
         stab_window = closes[-stab_periods:]
-        stabilising = all(c > flush_wick_low for c in stab_window)
+        if is_long:
+            wick = min(flush_window)
+            stabilising = all(c > wick for c in stab_window)
+        else:
+            wick = max(flush_window)
+            stabilising = all(c < wick for c in stab_window)
         conditions.append(
             ConditionResult(
-                name="price_stabilising_above_flush_wick",
+                name="price_stabilising_above_flush_wick" if is_long else "price_stabilising_below_squeeze_wick",
                 status="pass" if stabilising else "fail",
                 computed_value=stab_window,
-                threshold=flush_wick_low,
-                detail=f"every close for the last {stab_periods} periods must exceed the flush-bar low",
+                threshold=wick,
+                detail=(
+                    f"every close for the last {stab_periods} periods must "
+                    + ("exceed the flush-bar low" if is_long else "stay under the squeeze-bar high")
+                ),
             )
         )
 
     # --- funding reset -----------------------------------------------------------
-    funding_series = sorted(funding_history, key=lambda o: o.observed_at)
-    by_period: dict = {}
-    for obs in funding_series:
-        bucket = int(obs.observed_at.timestamp() // bar_seconds)
-        by_period.setdefault(bucket, []).append(obs.value)
-    period_means = [sum(vals) / len(vals) for _, vals in sorted(by_period.items())]
-    recent_funding = period_means[-funding_periods:]
+    recent_funding = period_means(funding_history, bar_seconds)[-funding_periods:]
+    funding_threshold = f"{'<=' if is_long else '>='} 0 for {funding_periods} periods"
     if len(recent_funding) < funding_periods:
         conditions.append(
             ConditionResult(
                 name="funding_reset",
                 status="unknown",
                 computed_value=None,
-                threshold=f"<= 0 for {funding_periods} periods",
+                threshold=funding_threshold,
                 detail="insufficient funding history across venues",
             )
         )
     else:
+        reset = all(f <= 0 for f in recent_funding) if is_long else all(f >= 0 for f in recent_funding)
         conditions.append(
             ConditionResult(
                 name="funding_reset",
-                status="pass" if all(f <= 0 for f in recent_funding) else "fail",
+                status="pass" if reset else "fail",
                 computed_value=recent_funding,
-                threshold=f"<= 0 for {funding_periods} periods",
+                threshold=funding_threshold,
                 detail="cross-venue mean funding (see doctrine's OI-weighting; simple mean pending calibration)",
             )
         )
@@ -180,4 +197,4 @@ def evaluate(
             )
         )
 
-    return GateResult(gate=SETUP_NAME, conditions=tuple(conditions))
+    return GateResult(gate=SETUP_NAME if is_long else SHORT_SETUP_NAME, conditions=tuple(conditions))

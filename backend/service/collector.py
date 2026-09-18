@@ -16,8 +16,9 @@ import signal
 import httpx
 
 from backend.core.config import Config, load_config
+from backend.core.observation import Metric
 from backend.scripts import backfill_history
-from backend.sources import binance, bybit, chain, coinbase, hyperliquid, issuer, kraken, okx
+from backend.sources import binance, bybit, chain, coinbase, hyperliquid, issuer, kraken, okx, okx_liquidations
 from backend.sources.base import SourceError
 from backend.sources.liquidations import run_liquidation_listeners
 from backend.store import db
@@ -53,7 +54,12 @@ _FAST_FETCHERS = [
 
 POLL_INTERVAL_SECONDS = 60
 FAST_POLL_INTERVAL_SECONDS = 10
-LIQUIDATION_SUPPORTED_VENUES = {"binance"}  # see sources/liquidations.py
+# 15s keeps a busy tape inside one or two pages per poll (ZEC, the busiest measured,
+# averages ~2 prints/min) while fetch_since pages further back if a cascade outruns it.
+LIQUIDATION_POLL_INTERVAL_SECONDS = 15
+# binance: websocket (sources/liquidations.py) — frames don't flow in this environment
+# okx: REST poll (sources/okx_liquidations.py) — the one that actually delivers here
+LIQUIDATION_SUPPORTED_VENUES = {"binance", "okx"}
 
 
 async def collect_once(
@@ -123,10 +129,67 @@ async def fast_poll_loop(stop_event: asyncio.Event) -> None:
                 pass
 
 
+async def collect_okx_liquidations(instrument: str, cfg: Config, *, client: httpx.AsyncClient) -> int:
+    """One poll of OKX's liquidation history for one instrument. Pages overlap from one
+    poll to the next, so every row is checked against what is already stored before it
+    is inserted. Returns the number of new prints written."""
+    source_id = okx_liquidations.SOURCE_ID
+    with db.get_connection() as conn:
+        since = db.latest_observed_at(conn, instrument=instrument, metric=Metric.LIQUIDATION, source_id=source_id)
+    observations = await okx_liquidations.fetch_since(instrument, cfg, client=client, since=since)
+    if not observations:
+        return 0
+    with db.get_connection() as conn:
+        seen = (
+            db.observation_keys_since(
+                conn, instrument=instrument, metric=Metric.LIQUIDATION, source_id=source_id, since=since
+            )
+            if since is not None
+            else set()
+        )
+        new = [o for o in observations if (o.observed_at.isoformat(), str(o.value)) not in seen]
+        for obs in new:
+            db.insert_observation(conn, obs)
+        db.record_source_success(conn, source_id)
+    return len(new)
+
+
+async def okx_liquidation_poll_loop(stop_event: asyncio.Event) -> None:
+    """Failures are logged as collector_events but deliberately NOT counted against the
+    okx_futures reliability register: that source_id also carries OKX's price, funding
+    and OI, and a flaky liquidation endpoint must not get those demoted."""
+    cfg = load_config()
+    async with httpx.AsyncClient() as client:
+        while not stop_event.is_set():
+            with db.get_connection() as conn:
+                instruments = db.list_watched_instruments(conn)
+            for instrument in instruments:
+                try:
+                    n = await collect_okx_liquidations(instrument, cfg, client=client)
+                    if n:
+                        logger.debug("collector: %d new okx liquidation prints for %s", n, instrument)
+                except SourceError as exc:
+                    logger.info("collector: okx liquidations/%s failed: %s", instrument, exc)
+                    with db.get_connection() as conn:
+                        db.record_collector_event(
+                            conn, source_id=okx_liquidations.SOURCE_ID, venue="okx", event_type="fetch_failed", detail=str(exc)
+                        )
+                except Exception as exc:  # noqa: BLE001 - never let one instrument stop the loop
+                    logger.exception("collector: unexpected error in okx liquidations/%s", instrument)
+                    with db.get_connection() as conn:
+                        db.record_collector_event(
+                            conn, source_id=okx_liquidations.SOURCE_ID, venue="okx", event_type="unexpected_error", detail=str(exc)
+                        )
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=LIQUIDATION_POLL_INTERVAL_SECONDS)
+            except asyncio.TimeoutError:
+                pass
+
+
 async def liquidation_supervisor(stop_event: asyncio.Event) -> None:
-    """Restarts the liquidation-listener set whenever the watchlist changes. Only
-    Binance is wired up today (see sources/liquidations.py) — other venues' liquidation
-    feeds are a documented follow-up, not silently faked."""
+    """Restarts the Binance liquidation websocket whenever the watchlist changes (see
+    sources/liquidations.py). OKX's REST feed runs separately in
+    okx_liquidation_poll_loop, since polling needs no supervisor to follow the list."""
     cfg = load_config()
     current_task: asyncio.Task | None = None
     current_set: frozenset[str] = frozenset()
@@ -194,6 +257,7 @@ async def main() -> None:
         poll_loop(stop_event),
         fast_poll_loop(stop_event),
         liquidation_supervisor(stop_event),
+        okx_liquidation_poll_loop(stop_event),
     )
 
 

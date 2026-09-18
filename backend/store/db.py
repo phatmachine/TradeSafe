@@ -216,6 +216,30 @@ def query_observations_all(
     return [_row_to_observation(r) for r in rows]
 
 
+def latest_observed_at(
+    conn: sqlite3.Connection, *, instrument: str, metric: Metric, source_id: str
+) -> datetime | None:
+    row = conn.execute(
+        "SELECT MAX(observed_at) FROM observations WHERE instrument = ? AND metric = ? AND source_id = ?",
+        (instrument, metric.value, source_id),
+    ).fetchone()
+    return _dt(row[0]) if row and row[0] else None
+
+
+def observation_keys_since(
+    conn: sqlite3.Connection, *, instrument: str, metric: Metric, source_id: str, since: datetime
+) -> set[tuple[str, str]]:
+    """(observed_at, value) of every stored row at or after `since` — what a polled
+    event feed (whose pages overlap from one poll to the next) dedupes against before
+    inserting, so the same discrete event is never counted twice."""
+    rows = conn.execute(
+        """SELECT observed_at, value FROM observations
+           WHERE instrument = ? AND metric = ? AND source_id = ? AND observed_at >= ?""",
+        (instrument, metric.value, source_id, _iso(since)),
+    ).fetchall()
+    return {(r[0], r[1]) for r in rows}
+
+
 def get_source_state(conn: sqlite3.Connection, source_id: str) -> dict:
     row = conn.execute(
         "SELECT * FROM source_state WHERE source_id = ?", (source_id,)

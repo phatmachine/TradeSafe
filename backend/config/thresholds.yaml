@@ -115,6 +115,13 @@ exhaustion:
   # uses carry_ratio_material, plus:
   structural_break_lookback_bars: 20
 
+# Fractions of the last swing leg (swing low -> high since it in an uptrend, mirrored in
+# a downtrend), NOT of price — see setups/continuation.py. The band itself is the
+# doctrine's own 15-25% and is unchanged; what changed 2026-09-18 is what it is measured
+# against. The old reading (drop from the high of the last 20 x 15-minute closes) was
+# structurally unreachable: over 365 days of 4h bars a confirmed uptrend coincided with a
+# 15-25% drop on that basis 0 times on BTC, ETH, SOL and ZEC (BTC's largest 5-hour drop
+# all year: 8.6%). The band is still an uncalibrated placeholder as a leg fraction.
 continuation:
   retrace_min_pct: 0.15
   retrace_max_pct: 0.25
@@ -147,6 +154,8 @@ gate_u:
 # Exit-monitoring windows, per setup, in days — the time-stop keys off this.
 expected_hold_window_days:
   cascade_absorption: 10
+  squeeze_absorption: 10                       # mirror of cascade_absorption
   positioning_exhaustion: 14
   event_decompression: 5
   trend_continuation_leverage_reset: 14
+  downtrend_continuation_leverage_reset: 14    # mirror of trend_continuation_leverage_reset

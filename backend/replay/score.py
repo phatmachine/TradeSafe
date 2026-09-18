@@ -3,8 +3,9 @@ costly refusals in separate columns. A single blended number hides which directi
 framework is wrong in." — this module never collapses the two into one figure.
 
 Directional bias per setup, used only to grade a REFUSAL's forward return (never to size
-or place anything): cascade absorption and trend continuation are long-only by
-construction (doctrine: "the condition to buy into" / "buy the pullback"); positioning
+or place anything): cascade absorption and uptrend continuation are long by construction
+(doctrine: "the condition to buy into" / "buy the pullback"), and their mirrors — squeeze
+absorption and downtrend continuation — are short by construction; positioning
 exhaustion and event decompression fade whichever cohort the report already named as
 trapped for that as_of.
 """
@@ -22,6 +23,7 @@ from backend.replay.sweep import SweepPoint
 from backend.report.contract import Verdict
 
 LONG_ONLY_SETUPS = {"cascade_absorption", "trend_continuation_leverage_reset"}
+SHORT_ONLY_SETUPS = {"squeeze_absorption", "downtrend_continuation_leverage_reset"}
 FADE_COHORT_SETUPS = {"positioning_exhaustion", "event_decompression"}
 
 
@@ -40,6 +42,8 @@ def _forward_return(conn: sqlite3.Connection, instrument: str, entry_at, hold_da
 def _direction_sign(setup_name: str, trapped_cohort: str | None) -> int | None:
     if setup_name in LONG_ONLY_SETUPS:
         return 1
+    if setup_name in SHORT_ONLY_SETUPS:
+        return -1
     if setup_name in FADE_COHORT_SETUPS:
         if trapped_cohort == "trapped_shorts":
             return 1  # shorts trapped -> squeeze up -> fade by going long
