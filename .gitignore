@@ -19,3 +19,7 @@ deploy/.env
 # OS/editor
 .DS_Store
 .pytest_cache/
+
+# WAL side files (the store runs in WAL mode)
+backend/store/*.db-wal
+backend/store/*.db-shm

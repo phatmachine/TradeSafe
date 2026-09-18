@@ -147,3 +147,18 @@ measured (see `/replay`). Every threshold above lives in `config/thresholds.yaml
 versioned via a config hash on every report, and should be calibrated from real history
 before being trusted — reports produced with placeholder thresholds are labelled
 `unvalidated` until a calibration sweep has been run.
+
+Two calibration routes, used together (added 2026-09-18):
+- **Full replay** (`backend/replay/sweep.py`) runs the whole pipeline, gates included, at
+  past instants. Exact, but only over periods the collector itself recorded, because the
+  gates need order-book depth and fresh per-venue readings that no venue publishes
+  historically.
+- **Offline history** (`python -m backend.research`) runs the same regime classifier and
+  setup code over years of free exchange history (price, volume, funding, Bybit open
+  interest, back to 2023) and scores each setup's signals against what price then did.
+  A **stated departure** from "same code path": it skips Gate U and Layer 0 (evaluating
+  every instant as if the data were trustworthy), uses narrower inputs than live (single-
+  venue OI and volume, settled rather than running funding), and has no liquidation
+  history — so cascade/squeeze absorption are scored without their liquidation check and
+  no trapped cohort is named. Thresholds those gaps touch keep calibrating from live
+  collection.
