@@ -239,13 +239,17 @@ async def main() -> None:
     cfg = load_config()
     with httpx.Client() as backfill_client:
         for sym in instruments:
-            try:
-                n = backfill_history.backfill(sym, cfg, client=backfill_client)
-            except SourceError as exc:
-                logger.info("collector: history backfill failed for %s: %s", sym, exc)
-                continue
-            if n:
-                logger.info("collector: backfilled %d historical closes for %s", n, sym)
+            for label, fn in (
+                ("closes", backfill_history.backfill),
+                ("open interest readings", backfill_history.backfill_open_interest),
+            ):
+                try:
+                    n = fn(sym, cfg, client=backfill_client)
+                except SourceError as exc:
+                    logger.info("collector: %s backfill failed for %s: %s", label, sym, exc)
+                    continue
+                if n:
+                    logger.info("collector: backfilled %d historical %s for %s", n, label, sym)
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()

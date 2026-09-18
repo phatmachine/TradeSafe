@@ -7,7 +7,7 @@ the premise is spent (coin OI rebuilt to within a band of its pre-flush level). 
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from backend.compute import cohort as cohort_mod
@@ -49,7 +49,7 @@ def evaluate_exit(position: dict, ds: DataSource, cfg: Config) -> dict:
             for o in ds.observations_including_expired(instrument, lookback_seconds=flush_window_hours * 3600 * 2)
             if o.metric == Metric.OI_COIN
         ]
-        series = aggregate_oi_series(oi_hist, bar_seconds)
+        series = aggregate_oi_series(oi_hist, bar_seconds, start=as_of - timedelta(hours=flush_window_hours))
         window_bars = max(1, int((flush_window_hours * 3600) // bar_seconds))
         recent = series[-window_bars:] if series else []
         if len(recent) >= 2:

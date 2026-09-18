@@ -29,6 +29,7 @@ to call the trend in the first place.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from backend.compute.funding import period_means
@@ -124,10 +125,12 @@ def evaluate(
         )
 
     # --- condition 2: coin OI falls during the retrace ----------------------------
-    oi_series = aggregate_oi_series(oi_history, bar_seconds)
     oi_at_extreme = oi_now = None
-    if extreme_index is not None and oi_series:
+    if extreme_index is not None:
         start = bars[extreme_index][0] * tf_seconds
+        oi_series = aggregate_oi_series(
+            oi_history, bar_seconds, start=datetime.fromtimestamp(start, tz=timezone.utc)
+        )
         in_extreme_bar = [v for b, v in oi_series if start <= b * bar_seconds < start + tf_seconds]
         if in_extreme_bar:
             oi_at_extreme, oi_now = in_extreme_bar[-1], oi_series[-1][1]

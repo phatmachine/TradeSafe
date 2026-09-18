@@ -18,6 +18,7 @@ from decimal import Decimal
 from statistics import median
 
 from backend.compute.cohort import Cohort
+from backend.compute.oi import aggregate_oi_series
 from backend.compute.regime import Regime
 from backend.core.config import Config
 from backend.core.observation import Observation
@@ -70,31 +71,24 @@ def funding_factor(funding_current: Decimal | None, cfg: Config) -> dict:
 
 
 def oi_price_factor(oi_history: list[Observation], price_history: list[Observation], as_of, cfg: Config) -> dict:
-    """The OI/price quadrant over the window. Coin OI is compared venue by venue, summing
-    only venues with a reading at both ends, so a venue dropping in or out of the
+    """The OI/price quadrant over the window. Coin OI comes from aggregate_oi_series, which
+    holds the venue set fixed across the window, so a venue dropping in or out of the
     collection is never mistaken for positions opening or closing."""
     hours = float(cfg.get("directional_factors", "window_hours", default=24))
     min_move = Decimal(str(cfg.get("directional_factors", "min_move_pct", default=0.01)))
+    bar_seconds = int(cfg.get("cascade", "bar_seconds", default=900))
     window = timedelta(hours=hours)
     name = f"Open interest vs price ({hours:g}h)"
 
-    by_venue: dict[str, list[Observation]] = {}
-    for obs in sorted(oi_history, key=lambda o: o.observed_at):
-        by_venue.setdefault(obs.venue, []).append(obs)
-    start_total = end_total = Decimal(0)
-    for series in by_venue.values():
-        # "At" the window start means within an hour of it, not any older reading.
-        start = _value_at(series, as_of - window)
-        end = _value_at(series, as_of)
-        if start is None or end is None or start.observed_at < as_of - window - timedelta(hours=1):
-            continue
-        start_total += start.value
-        end_total += end.value
+    start = as_of - window
+    series = aggregate_oi_series(oi_history, bar_seconds, start=start)
+    # The series must actually begin at the window start, not somewhere inside it.
+    reaches_start = bool(series) and series[0][0] * bar_seconds <= start.timestamp() + 3600
     price_change = _price_change(price_history, as_of, window)
-    if start_total == 0 or price_change is None:
+    if not reaches_start or series[0][1] == 0 or price_change is None:
         return _factor(name, None, UNKNOWN, f"needs {hours:g}h of collected OI and price history")
 
-    oi_change = (end_total - start_total) / start_total
+    oi_change = (series[-1][1] - series[0][1]) / series[0][1]
     value = f"OI {_pct(oi_change)}, price {_pct(price_change)}"
     oi_up, oi_down = oi_change >= min_move, oi_change <= -min_move
     px_up, px_down = price_change >= min_move, price_change <= -min_move
@@ -109,7 +103,8 @@ def oi_price_factor(oi_history: list[Observation], price_history: list[Observati
             name, value, NEUTRAL,
             "price falling as positions close — longs exiting; if it becomes a flush, that's the cascade setup's job to confirm",
         )
-    return _factor(name, value, NEUTRAL, f"neither OI nor price moved {min_move:.0%} or more — no positioning signal")
+    flat = " and ".join(label for label, up, down in (("OI", oi_up, oi_down), ("price", px_up, px_down)) if not (up or down))
+    return _factor(name, value, NEUTRAL, f"{flat} moved less than {min_move:.0%} — no positioning signal")
 
 
 def cohort_factor(cohort: Cohort) -> dict:

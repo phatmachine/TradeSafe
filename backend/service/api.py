@@ -95,19 +95,20 @@ def list_instruments():
 
 
 def _bootstrap_history(symbol: str, cfg) -> None:
-    """Backfill daily price history for a symbol if it has none yet, so
-    realised_vol_in_band (which needs ~30 days of single-venue closes) isn't left
-    unknown on a first-time lookup. Must be called from every entry point a symbol can
+    """Backfill price and open-interest history for a symbol if it has none yet, so
+    realised_vol_in_band (which needs ~30 days of single-venue closes) and the OI-based
+    checks aren't left unknown on a first-time lookup. Must be called from every entry point a symbol can
     first arrive through — the frontend analyses by calling GET /api/report/{symbol}
     directly and never touches POST /api/instruments/{symbol}, so wiring this only into
-    the latter left first-time lookups waiting for a collector restart. backfill()
-    checks stored row counts before making any network call, so repeat calls are a
-    single COUNT query."""
+    the latter left first-time lookups waiting for a collector restart. Both backfills
+    check what's stored before making any network call, so repeat calls are a single
+    indexed query each."""
     with httpx.Client() as client:
-        try:
-            backfill_history.backfill(symbol, cfg, client=client)
-        except SourceError:
-            pass
+        for fn in (backfill_history.backfill, backfill_history.backfill_open_interest):
+            try:
+                fn(symbol, cfg, client=client)
+            except SourceError:
+                pass
 
 
 @app.post("/api/instruments/{symbol}", dependencies=[Depends(require_auth)])

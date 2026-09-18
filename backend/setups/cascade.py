@@ -57,7 +57,7 @@ def evaluate(
     conditions: list[ConditionResult] = []
 
     # --- OI collapse confirmed and held -----------------------------------------
-    oi_series = aggregate_oi_series(oi_history, bar_seconds)
+    oi_series = aggregate_oi_series(oi_history, bar_seconds, start=as_of - timedelta(hours=flush_window_hours))
     window_bars = max(1, int((flush_window_hours * 3600) // bar_seconds))
     recent = oi_series[-window_bars:] if oi_series else []
     if len(recent) < flush_hold_periods + 1:

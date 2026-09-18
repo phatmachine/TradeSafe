@@ -10,7 +10,9 @@ from a different venue.
 """
 from __future__ import annotations
 
+from bisect import bisect_left
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from backend.core.observation import Metric, Observation
@@ -55,24 +57,70 @@ def aggregate_oi_coin(observations: list[Observation]) -> AggregateOI:
     return AggregateOI(total_coins=total, per_venue=readings)
 
 
-def aggregate_oi_series(observations: list[Observation], bucket_seconds: int) -> list[tuple[int, Decimal]]:
-    """A time series of aggregate coin OI, bucketed. Each venue's own series is resampled
-    to the same buckets (last reading per venue per bucket) and then summed across
-    whichever venues have a reading in that bucket — an aggregation across venues at
-    each metric's own equivalent point in time, not a cross-venue ratio, so this does not
-    fall under the never-compute-a-ratio-across-observed_at rule (0.10's sync_tolerance
-    applies to ratios, not sums of the same metric)."""
-    oi_obs = [o for o in observations if o.metric == Metric.OI_COIN]
-    per_venue: dict[str, dict[int, Observation]] = {}
-    for obs in sorted(oi_obs, key=lambda o: o.observed_at):
-        bucket = int(obs.observed_at.timestamp() // bucket_seconds)
-        per_venue.setdefault(obs.venue, {})[bucket] = obs
+# How long a venue's last OI reading may be carried forward to fill a bucket it has no
+# reading in. Matches the normal OI half-life (config expiry.oi_funding_normal_seconds).
+MAX_STALENESS_SECONDS = 3600
 
-    all_buckets = sorted({b for venue_buckets in per_venue.values() for b in venue_buckets})
+
+def aggregate_oi_series(
+    observations: list[Observation],
+    bucket_seconds: int,
+    *,
+    start: datetime | None = None,
+    max_staleness_seconds: int = MAX_STALENESS_SECONDS,
+) -> list[tuple[int, Decimal]]:
+    """Aggregate coin OI per bucket from `start` (or the earliest reading) to the latest,
+    summed over a FIXED set of venues: those with a reading at both the first and the
+    last bucket. Each venue's value in a bucket is its latest reading by the bucket's end,
+    carried forward at most max_staleness_seconds; a bucket where any venue in the set has
+    no reading that fresh is dropped rather than summed short.
+
+    The fixed set is the point. Venues join and leave the collection — history backfilled
+    from one venue, a venue added later, a single failed poll — and summing whichever
+    venues happen to report in each bucket reads a venue joining as positions opening and
+    a missed poll as positions closing. Holding the set fixed across the span means every
+    change in the series is a change in positioning.
+
+    An aggregation of the same metric across venues at each point in time, not a
+    cross-venue ratio, so the never-compute-a-ratio-across-observed_at rule (0.10's
+    sync_tolerance) does not apply."""
+    floor = start - timedelta(seconds=max_staleness_seconds) if start is not None else None
+    oi_obs = sorted(
+        (o for o in observations if o.metric == Metric.OI_COIN and (floor is None or o.observed_at >= floor)),
+        key=lambda o: o.observed_at,
+    )
+    if not oi_obs:
+        return []
+
+    per_venue: dict[str, tuple[list[float], list[Decimal]]] = {}
+    for obs in oi_obs:
+        times, values = per_venue.setdefault(obs.venue, ([], []))
+        times.append(obs.observed_at.timestamp())
+        values.append(obs.value)
+
+    span_start = (start or oi_obs[0].observed_at).timestamp()
+    buckets = sorted({int(o.observed_at.timestamp() // bucket_seconds) for o in oi_obs if o.observed_at.timestamp() >= span_start})
+    if not buckets:
+        return []
+
+    def reading(venue: str, bucket: int) -> Decimal | None:
+        times, values = per_venue[venue]
+        bucket_end = (bucket + 1) * bucket_seconds
+        i = bisect_left(times, bucket_end) - 1  # latest reading strictly before the bucket ends
+        if i < 0 or bucket_end - times[i] > max_staleness_seconds + bucket_seconds:
+            return None
+        return values[i]
+
+    venues = [v for v in per_venue if reading(v, buckets[0]) is not None and reading(v, buckets[-1]) is not None]
+    if not venues:
+        return []
+
     series: list[tuple[int, Decimal]] = []
-    for b in all_buckets:
-        total = sum((venue_buckets[b].value for venue_buckets in per_venue.values() if b in venue_buckets), Decimal(0))
-        series.append((b, total))
+    for bucket in buckets:
+        values = [reading(v, bucket) for v in venues]
+        if any(val is None for val in values):
+            continue
+        series.append((bucket, sum(values, Decimal(0))))
     return series
 
 
