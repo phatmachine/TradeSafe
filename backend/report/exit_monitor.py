@@ -27,7 +27,9 @@ def evaluate_exit(position: dict, ds: DataSource, cfg: Config) -> dict:
     as_of = ds.get_as_of()
 
     liq_window_hours = float(cfg.get("liq_window_hours", default=72))
-    liq_hist = ds.observations_including_expired(instrument, lookback_seconds=liq_window_hours * 3600)
+    liq_hist = ds.observations_including_expired(
+        instrument, lookback_seconds=liq_window_hours * 3600, metrics=(Metric.LIQUIDATION,)
+    )
     current_cohort = cohort_mod.classify(liq_hist, cfg=cfg)
     thesis_invalidated = (
         current_cohort.cohort.value != "unnamed"
@@ -44,11 +46,9 @@ def evaluate_exit(position: dict, ds: DataSource, cfg: Config) -> dict:
         bar_seconds = int(cfg.get("cascade", "bar_seconds", default=900))
         flush_window_hours = float(cfg.get("cascade", "flush_window_hours", default=48))
         spent_band = Decimal(str(cfg.get("cascade", "spent_band_pct", default=0.05)))
-        oi_hist = [
-            o
-            for o in ds.observations_including_expired(instrument, lookback_seconds=flush_window_hours * 3600 * 2)
-            if o.metric == Metric.OI_COIN
-        ]
+        oi_hist = ds.observations_including_expired(
+            instrument, lookback_seconds=flush_window_hours * 3600 * 2, metrics=(Metric.OI_COIN,)
+        )
         series = aggregate_oi_series(oi_hist, bar_seconds, start=as_of - timedelta(hours=flush_window_hours))
         window_bars = max(1, int((flush_window_hours * 3600) // bar_seconds))
         recent = series[-window_bars:] if series else []

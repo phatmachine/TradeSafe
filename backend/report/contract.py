@@ -278,13 +278,24 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
 
     rv_long_days = int(cfg.get("rv_long_days", default=30))
     history_lookback = rv_long_days * 86400
-    all_history = ds.observations_including_expired(instrument, lookback_seconds=history_lookback)
+    all_history = ds.observations_including_expired(
+        instrument,
+        lookback_seconds=history_lookback,
+        metrics=(Metric.PRICE, Metric.OI_COIN, Metric.FUNDING_8H, Metric.PERP_VOLUME, Metric.SPOT_VOLUME, Metric.EVENT),
+    )
     price_hist_all = [o for o in all_history if o.metric == Metric.PRICE]
     price_hist_single_venue = _single_best_venue_series(price_hist_all, Metric.PRICE)
     oi_hist = [o for o in all_history if o.metric == Metric.OI_COIN]
     funding_hist = [o for o in all_history if o.metric == Metric.FUNDING_8H]
-    liq_hist = [o for o in all_history if o.metric == Metric.LIQUIDATION]
     event_hist = [o for o in all_history if o.metric == Metric.EVENT]
+    # Liquidations are discrete prints (never compacted) and the busiest coins log
+    # thousands a day, so they're read over the cohort window only — the widest window
+    # anything here looks at them over — not the 30 days the level series need.
+    liq_hist = ds.observations_including_expired(
+        instrument,
+        lookback_seconds=float(cfg.get("liq_window_hours", default=72)) * 3600,
+        metrics=(Metric.LIQUIDATION,),
+    )
 
     regime_result = regime_mod.classify(price_hist_single_venue, cfg=cfg)
     cohort_result = cohort_mod.classify(liq_hist, cfg=cfg)
@@ -293,8 +304,10 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
     spot_now = {v: o.value for v, o in latest_per_venue([o for o in clean if o.metric == Metric.SPOT_VOLUME]).items()}
     perp_vol = sum(perp_now.values(), Decimal(0)) or None
     spot_vol = sum(spot_now.values(), Decimal(0)) or None
-    funding_obs = [o for o in clean if o.metric == Metric.FUNDING_8H]
-    funding_current = sum((o.value for o in funding_obs), Decimal(0)) / len(funding_obs) if funding_obs else None
+    # Cross-venue mean of each venue's latest reading — not of every reading still inside
+    # funding's 1h half-life, which weighted venues by poll frequency (see compute/funding.py).
+    funding_now = [o.value for o in latest_per_venue([o for o in clean if o.metric == Metric.FUNDING_8H]).values()]
+    funding_current = sum(funding_now, Decimal(0)) / len(funding_now) if funding_now else None
 
     # Computed whenever the gates pass — including an undetermined regime, which blocks
     # every setup but still leaves the directional evidence worth reading.

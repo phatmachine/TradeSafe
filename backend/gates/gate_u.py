@@ -172,11 +172,9 @@ def evaluate(instrument: str, ds: DataSource, cfg: Config) -> GateResult:
     # print was a real observation at its own observed_at, so this deliberately uses the
     # non-expiry-filtered primitive rather than ds.observations() (see
     # replay/source.py's observations_including_expired docstring).
-    price_history = [
-        o
-        for o in ds.observations_including_expired(instrument, lookback_seconds=rv_long_days * 86400)
-        if o.metric == Metric.PRICE
-    ]
+    price_history = ds.observations_including_expired(
+        instrument, lookback_seconds=rv_long_days * 86400, metrics=(Metric.PRICE,)
+    )
     by_venue: dict[str, list] = {}
     for o in price_history:
         by_venue.setdefault(o.venue, []).append(o)

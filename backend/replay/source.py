@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import sqlite3
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from datetime import datetime
 
 from backend.core.clock import Clock, FrozenClock, RealClock
@@ -38,7 +39,7 @@ class DataSource(ABC):
 
     @abstractmethod
     def observations_including_expired(
-        self, instrument: str, *, lookback_seconds: float
+        self, instrument: str, *, lookback_seconds: float, metrics: Iterable[Metric] | None = None
     ) -> list[Observation]:
         """The historical-series primitive. Half-life expiry (doctrine 0.2) answers "is
         this still a valid reading of the CURRENT state" — it does not mean a past print
@@ -48,7 +49,8 @@ class DataSource(ABC):
         never observations(), which only ever answers "what is true right now" and would
         silently return an empty series for any window wider than a metric's half-life.
         Still enforces no-lookahead (observed_at <= as_of) — only the expiry filter is
-        relaxed."""
+        relaxed. Pass `metrics` to read only what the caller uses: a month of every
+        metric is far more rows than any single consumer needs."""
         ...
 
 
@@ -80,10 +82,14 @@ class LiveSource(DataSource):
         )
 
     def observations_including_expired(
-        self, instrument: str, *, lookback_seconds: float
+        self, instrument: str, *, lookback_seconds: float, metrics: Iterable[Metric] | None = None
     ) -> list[Observation]:
         return db.query_observations_all(
-            self._conn, instrument=instrument, as_of=self.get_as_of(), lookback_seconds=lookback_seconds
+            self._conn,
+            instrument=instrument,
+            as_of=self.get_as_of(),
+            lookback_seconds=lookback_seconds,
+            metrics=metrics,
         )
 
 
@@ -116,8 +122,12 @@ class ReplaySource(DataSource):
         )
 
     def observations_including_expired(
-        self, instrument: str, *, lookback_seconds: float
+        self, instrument: str, *, lookback_seconds: float, metrics: Iterable[Metric] | None = None
     ) -> list[Observation]:
         return db.query_observations_all(
-            self._conn, instrument=instrument, as_of=self.get_as_of(), lookback_seconds=lookback_seconds
+            self._conn,
+            instrument=instrument,
+            as_of=self.get_as_of(),
+            lookback_seconds=lookback_seconds,
+            metrics=metrics,
         )

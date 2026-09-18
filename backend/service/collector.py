@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import logging
 import signal
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -60,6 +61,20 @@ LIQUIDATION_POLL_INTERVAL_SECONDS = 15
 # binance: websocket (sources/liquidations.py) — frames don't flow in this environment
 # okx: REST poll (sources/okx_liquidations.py) — the one that actually delivers here
 LIQUIDATION_SUPPORTED_VENUES = {"binance", "okx"}
+
+# Compaction (store.db.compact_observations): rows older than COMPACT_AFTER are thinned
+# to one per 15 minutes per series, hourly. Without it every 10-second poll is kept for
+# good, and since each report reads up to 30 days of history, report time and file size
+# grow without bound — 5-7s per report after just 8 hours of the fast loop. Two hours
+# comfortably outlasts every short half-life (the longest, OI/funding/volume, is 1h), and
+# nothing reads history at finer than 15 minutes.
+COMPACT_AFTER = timedelta(hours=2)
+COMPACTION_INTERVAL_SECONDS = 3600
+COMPACTION_RECENT_SPAN = timedelta(days=2)  # after the first pass, only recent rows need it
+# VACUUM after the first pass (reclaims everything that pass freed) and then daily. Freed
+# pages are reused by new rows in between, so the file stays bounded either way; the
+# daily rewrite just keeps surviving rows contiguous so history reads stay fast.
+VACUUM_INTERVAL = timedelta(days=1)
 
 
 async def collect_once(
@@ -186,6 +201,60 @@ async def okx_liquidation_poll_loop(stop_event: asyncio.Event) -> None:
                 pass
 
 
+def _floor_to_bucket(at: datetime) -> datetime:
+    bucket = db.COMPACTION_BUCKET_SECONDS
+    return datetime.fromtimestamp(int(at.timestamp()) // bucket * bucket, tz=timezone.utc)
+
+
+def compact_once(*, full: bool) -> int:
+    """One compaction pass over every watched instrument, one day per transaction so the
+    write lock is never held long enough to stall the 10-second poll. `full` covers
+    everything stored (the first pass after startup); otherwise only the last two days,
+    which is all an hourly pass can have left uncompacted."""
+    now = datetime.now(timezone.utc)
+    until = _floor_to_bucket(now - COMPACT_AFTER)
+    removed = 0
+    with db.get_connection() as conn:
+        instruments = db.list_watched_instruments(conn)
+    for instrument in instruments:
+        if full:
+            with db.get_connection() as conn:
+                earliest = db.earliest_observed_at(conn, instrument=instrument)
+            if earliest is None:
+                continue
+            start = _floor_to_bucket(earliest)
+        else:
+            start = _floor_to_bucket(until - COMPACTION_RECENT_SPAN)
+        while start < until:
+            end = min(start + timedelta(days=1), until)
+            with db.get_connection() as conn:
+                removed += db.compact_observations(conn, instrument=instrument, since=start, until=end, now=now)
+            start = end
+    return removed
+
+
+async def compaction_loop(stop_event: asyncio.Event) -> None:
+    full = True
+    last_vacuum: datetime | None = None
+    while not stop_event.is_set():
+        try:
+            removed = await asyncio.to_thread(compact_once, full=full)
+            full = False
+            if removed:
+                logger.info("collector: compacted %d superseded observations", removed)
+            now = datetime.now(timezone.utc)
+            if last_vacuum is None or now - last_vacuum >= VACUUM_INTERVAL:
+                await asyncio.to_thread(db.vacuum)
+                last_vacuum = now
+                logger.info("collector: vacuumed the store")
+        except Exception:  # noqa: BLE001 - a failed pass is retried next hour; never stop collection
+            logger.exception("collector: compaction pass failed")
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=COMPACTION_INTERVAL_SECONDS)
+        except asyncio.TimeoutError:
+            pass
+
+
 async def liquidation_supervisor(stop_event: asyncio.Event) -> None:
     """Restarts the Binance liquidation websocket whenever the watchlist changes (see
     sources/liquidations.py). OKX's REST feed runs separately in
@@ -262,6 +331,7 @@ async def main() -> None:
         fast_poll_loop(stop_event),
         liquidation_supervisor(stop_event),
         okx_liquidation_poll_loop(stop_event),
+        compaction_loop(stop_event),
     )
 
 
