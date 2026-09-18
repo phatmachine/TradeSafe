@@ -8,6 +8,13 @@ const VERDICT_COPY: Record<string, { label: string; className: string }> = {
   CLASSIFIER_CONFLICT: { label: "Classifier conflict — trading nothing", className: "classifier_conflict" },
 };
 
+const LEAN_LABEL: Record<string, string> = {
+  supports_long: "▲ Supports long",
+  against_long: "▼ Against long",
+  neutral: "● Neutral",
+  unknown: "? Not enough data",
+};
+
 const BIAS_LABEL: Record<string, string> = {
   long: "Long",
   short: "Short",
@@ -94,6 +101,27 @@ export function ReportView({ report }: { report: AnalysisReport }) {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {report.directional_factors && report.directional_factors.length > 0 && (
+        <div className="section">
+          <div className="section-title">Directional factors</div>
+          <div className="card">
+            <div className="flip-detail" style={{ marginBottom: 10 }}>
+              What each piece of directional evidence currently means for a long. Context only — these don't change the verdict above.
+            </div>
+            {report.directional_factors.map((f) => (
+              <div className="factor-row" key={f.factor}>
+                <div className="factor-head">
+                  <span className="factor-name">{f.factor}</span>
+                  <span className={`lean-pill ${f.lean}`}>{LEAN_LABEL[f.lean]}</span>
+                </div>
+                {f.value && <div className="condition-values mono">{f.value}</div>}
+                <div className="condition-detail">{f.reason}</div>
+              </div>
+            ))}
           </div>
         </div>
       )}

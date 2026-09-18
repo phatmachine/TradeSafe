@@ -305,6 +305,61 @@ body {
   margin-top: 2px;
 }
 
+/* Which side a gate/setup card argues for, and what each check means for a long. */
+.case-tag,
+.lean-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.case-tag.long, .lean-tag.supports_long { background: rgba(200,241,105,0.18); color: var(--accent); }
+.case-tag.short, .lean-tag.against_long { background: rgba(255,107,94,0.18); color: var(--red); }
+.case-tag.unclear, .case-tag.not_directional { background: rgba(154,156,146,0.18); color: var(--text-dim); }
+.lean-tag.unmet { background: transparent; color: var(--text-faint); border: 1px solid var(--border); }
+
+.case-note {
+  color: var(--text-faint);
+  font-size: 12px;
+  margin: -4px 0 8px;
+}
+
+.factor-row {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+.flip-detail + .factor-row { border-top: none; }
+
+.factor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.factor-name { font-weight: 600; }
+
+.lean-pill {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+.lean-pill.supports_long { background: rgba(200,241,105,0.18); color: var(--accent); }
+.lean-pill.against_long { background: rgba(255,107,94,0.18); color: var(--red); }
+.lean-pill.neutral { background: rgba(154,156,146,0.18); color: var(--text-dim); }
+.lean-pill.unknown { background: transparent; color: var(--text-faint); border: 1px solid var(--border); }
+
 .kv-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

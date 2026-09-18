@@ -6,8 +6,17 @@ from __future__ import annotations
 from backend.report.contract import AnalysisReport
 
 
+_CASE_LABEL = {
+    "long": "Long case",
+    "short": "Short case",
+    "unclear": "direction unclear",
+    "not_directional": "not directional — can this report be trusted?",
+}
+
+
 def _render_gate(gate: dict) -> str:
-    lines = [f"  [{gate['gate']}] {'PASS' if gate['passed'] else 'FAIL'}"]
+    case = gate.get("case")
+    lines = [f"  [{gate['gate']}] {'PASS' if gate['passed'] else 'FAIL'}" + (f"  ({_CASE_LABEL[case]})" if case else "")]
     for c in gate["conditions"]:
         marker = {"pass": "OK ", "fail": "FAIL", "unknown": "?  "}[c["status"]]
         lines.append(f"    {marker} {c['name']}: {c['computed_value']} (threshold {c['threshold']}) — {c['detail']}")
@@ -15,6 +24,7 @@ def _render_gate(gate: dict) -> str:
 
 
 _BIAS_LABEL = {"long": "LONG", "short": "SHORT", "unclear": "NO CLEAR DIRECTION"}
+_LEAN_LABEL = {"supports_long": "+ supports long", "against_long": "- against long", "neutral": "  neutral", "unknown": "? unknown"}
 
 
 def render_text(report: AnalysisReport) -> str:
@@ -54,6 +64,11 @@ def render_text(report: AnalysisReport) -> str:
             f"  trapped cohort: {sc.get('trapped_cohort')}",
             f"  constraint ratios: {sc.get('constraint_ratios')}",
         ]
+
+    if d["directional_factors"]:
+        lines += ["", "-- Directional factors (context for a long, not a verdict) --"]
+        for f in d["directional_factors"]:
+            lines.append(f"  {_LEAN_LABEL[f['lean']]:<16} {f['factor']}: {f['value'] or '—'} — {f['reason']}")
 
     if d["setup_evaluation"]:
         lines += ["", "-- Setup evaluation --"]

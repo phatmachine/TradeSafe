@@ -10,7 +10,7 @@ coverage").
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from decimal import Decimal
 from enum import Enum
@@ -27,6 +27,7 @@ from backend.core.registry import SourceRegistry
 from backend.gates import gate_u, layer_0
 from backend.gates.common import GateResult
 from backend.replay.source import DataSource
+from backend.report import factors as factors_mod
 from backend.setups import cascade, continuation, event, exhaustion
 
 
@@ -39,6 +40,27 @@ class Verdict(str, Enum):
 
 def _run_id(instrument: str, as_of, config_hash: str) -> str:
     return hashlib.sha256(f"{instrument}:{as_of.isoformat()}:{config_hash}".encode()).hexdigest()[:24]
+
+
+# Which side each setup's conditions argue for, shown on its card. Gate U and Layer 0 are
+# "not_directional": they decide whether the report can be trusted at all, not which way
+# price goes (see report/factors.py for the evidence that does carry a direction).
+SETUP_CASE = {
+    cascade.SETUP_NAME: "long",
+    continuation.SETUP_NAME: "long",
+    cascade.SHORT_SETUP_NAME: "short",
+    continuation.SHORT_SETUP_NAME: "short",
+    exhaustion.SETUP_NAME: "unclear",
+    event.SETUP_NAME: "unclear",
+}
+
+
+def _gate_dict(gate: GateResult) -> dict:
+    return {**gate.to_dict(), "case": "not_directional"}
+
+
+def _setup_dicts(setup_results: dict[str, GateResult]) -> list[dict]:
+    return [{**r.to_dict(), "case": SETUP_CASE.get(name, "unclear")} for name, r in setup_results.items()]
 
 
 def _single_best_venue_series(observations: list[Observation], metric: Metric) -> list[Observation]:
@@ -155,6 +177,7 @@ class AnalysisReport:
     distance_to_flip: list[dict]
     structural_reads: list[dict]
     verdict_bias: str | None
+    directional_factors: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -171,6 +194,7 @@ class AnalysisReport:
             "setup_evaluation": self.setup_evaluation,
             "distance_to_flip": self.distance_to_flip,
             "structural_reads": self.structural_reads,
+            "directional_factors": self.directional_factors,
         }
 
 
@@ -221,7 +245,7 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
             config_hash=cfg.config_hash,
             config_validated=cfg.validated,
             verdict=Verdict.GATE_FAIL.value,
-            gate_status=[gu.to_dict()],
+            gate_status=[_gate_dict(gu)],
             data_integrity={},
             state_classification={},
             setup_evaluation=[],
@@ -239,7 +263,7 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
             config_hash=cfg.config_hash,
             config_validated=cfg.validated,
             verdict=Verdict.GATE_FAIL.value,
-            gate_status=[gu.to_dict(), l0.gate_result.to_dict()],
+            gate_status=[_gate_dict(gu), _gate_dict(l0.gate_result)],
             data_integrity=_data_integrity_summary(instrument, ds, registry, l0.clean_observations),
             state_classification={},
             setup_evaluation=[],
@@ -249,7 +273,7 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
         )
 
     clean = l0.clean_observations
-    gate_status = [gu.to_dict(), l0.gate_result.to_dict()]
+    gate_status = [_gate_dict(gu), _gate_dict(l0.gate_result)]
     data_integrity = _data_integrity_summary(instrument, ds, registry, clean)
 
     rv_long_days = int(cfg.get("rv_long_days", default=30))
@@ -263,6 +287,31 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
     event_hist = [o for o in all_history if o.metric == Metric.EVENT]
 
     regime_result = regime_mod.classify(price_hist_single_venue, cfg=cfg)
+    cohort_result = cohort_mod.classify(liq_hist, cfg=cfg)
+
+    perp_now = {v: o.value for v, o in latest_per_venue([o for o in clean if o.metric == Metric.PERP_VOLUME]).items()}
+    spot_now = {v: o.value for v, o in latest_per_venue([o for o in clean if o.metric == Metric.SPOT_VOLUME]).items()}
+    perp_vol = sum(perp_now.values(), Decimal(0)) or None
+    spot_vol = sum(spot_now.values(), Decimal(0)) or None
+    funding_obs = [o for o in clean if o.metric == Metric.FUNDING_8H]
+    funding_current = sum((o.value for o in funding_obs), Decimal(0)) / len(funding_obs) if funding_obs else None
+
+    # Computed whenever the gates pass — including an undetermined regime, which blocks
+    # every setup but still leaves the directional evidence worth reading.
+    directional_factors = factors_mod.directional_factors(
+        regime=regime_result.regime,
+        cohort=cohort_result.cohort,
+        funding_current=funding_current,
+        oi_history=oi_hist,
+        price_history=price_hist_single_venue,
+        perp_now=perp_now,
+        spot_now=spot_now,
+        perp_history=[o for o in all_history if o.metric == Metric.PERP_VOLUME],
+        spot_history=[o for o in all_history if o.metric == Metric.SPOT_VOLUME],
+        as_of=as_of,
+        cfg=cfg,
+    )
+
     if regime_result.regime == regime_mod.Regime.UNDETERMINED:
         return AnalysisReport(
             run_id=run_id,
@@ -278,19 +327,14 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
             distance_to_flip=[],
             structural_reads=[],
             verdict_bias=None,
+            directional_factors=directional_factors,
         )
-
-    cohort_result = cohort_mod.classify(liq_hist, cfg=cfg)
 
     oi_agg = aggregate_oi_coin([o for o in clean if o.metric == Metric.OI_COIN])
     price_obs = [o for o in clean if o.metric == Metric.PRICE]
     price_current = price_obs[-1].value if price_obs else None
     mcap_obs = [o for o in clean if o.metric == Metric.MARKET_CAP]
     market_cap = mcap_obs[-1].value if mcap_obs else None
-    perp_vol = sum((o.value for o in latest_per_venue([o for o in clean if o.metric == Metric.PERP_VOLUME]).values()), Decimal(0)) or None
-    spot_vol = sum((o.value for o in latest_per_venue([o for o in clean if o.metric == Metric.SPOT_VOLUME]).values()), Decimal(0)) or None
-    funding_obs = [o for o in clean if o.metric == Metric.FUNDING_8H]
-    funding_current = sum((o.value for o in funding_obs), Decimal(0)) / len(funding_obs) if funding_obs else None
 
     daily = daily_closes(price_hist_single_venue)
     bars = [(c, c, c) for c in daily]
@@ -376,10 +420,11 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
             gate_status=gate_status,
             data_integrity=data_integrity,
             state_classification=state_classification,
-            setup_evaluation=[r.to_dict() for r in setup_results.values()],
+            setup_evaluation=_setup_dicts(setup_results),
             distance_to_flip=[],
             structural_reads=[],
             verdict_bias=None,
+            directional_factors=directional_factors,
         )
 
     any_eligible = any(r.passed for r in setup_results.values())
@@ -405,8 +450,9 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
         data_integrity=data_integrity,
         state_classification=state_classification,
         structural_reads=structural_reads,
-        setup_evaluation=[r.to_dict() for r in setup_results.values()],
+        setup_evaluation=_setup_dicts(setup_results),
         distance_to_flip=distance_to_flip,
+        directional_factors=directional_factors,
     )
 
 

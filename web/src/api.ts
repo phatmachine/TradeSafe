@@ -6,10 +6,24 @@ export interface ConditionResult {
   detail: string;
 }
 
+// Which side a card's conditions argue for. Gate U / Layer 0 are "not_directional":
+// they decide whether the report can be trusted, not which way price goes.
+export type GateCase = "long" | "short" | "unclear" | "not_directional";
+
 export interface GateResultJSON {
   gate: string;
   passed: boolean;
+  case?: GateCase;
   conditions: ConditionResult[];
+}
+
+export type Lean = "supports_long" | "against_long" | "neutral" | "unknown";
+
+export interface DirectionalFactor {
+  factor: string;
+  value: string | null;
+  lean: Lean;
+  reason: string;
 }
 
 export interface DistanceToFlipItem {
@@ -59,6 +73,7 @@ export interface AnalysisReport {
   setup_evaluation: GateResultJSON[];
   distance_to_flip: DistanceToFlipItem[];
   structural_reads: StructuralRead[];
+  directional_factors?: DirectionalFactor[];
 }
 
 const BASE = "";

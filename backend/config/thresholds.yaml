@@ -151,6 +151,20 @@ gate_u:
   reference_intended_size_coins: 1.0   # placeholder notional the depth check sizes against;
                                         # replace with your real intended trade size
 
+# Directional factors (report/factors.py) — the "for or against a long" read shown next
+# to the setups. PRESENTATION ONLY: none of these feed a verdict, verdict_bias or setup,
+# so they can't make a report pass or fail. Uncalibrated placeholders like the rest of
+# this file, except funding_neutral_max_pct, which is a venue convention rather than a
+# choice: Binance, Bybit and OKX all default to 0.01% per 8h (the interest component)
+# when longs and shorts are balanced, so only funding above it means longs are paying up.
+directional_factors:
+  funding_neutral_max_pct: 0.01   # percent per 8h, same units as FUNDING_8H observations
+  window_hours: 24                # OI-vs-price and the perp/spot price move look back this far
+  min_move_pct: 0.01              # OI or price moves smaller than 1% read as flat
+  perp_spot_baseline_days: 7      # "this coin's usual mix" = median hourly perp/spot ratio over this
+  perp_spot_min_baseline_hours: 48  # fewer hours of history than this -> unknown, not a guess
+  perp_spot_band_pct: 0.2         # more than 20% above/below the usual mix = perp-/spot-heavy
+
 # Exit-monitoring windows, per setup, in days — the time-stop keys off this.
 expected_hold_window_days:
   cascade_absorption: 10
