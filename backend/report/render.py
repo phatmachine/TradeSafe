@@ -7,8 +7,8 @@ from backend.report.contract import AnalysisReport
 
 
 _CASE_LABEL = {
-    "long": "Long case",
-    "short": "Short case",
+    "long": "long-type setup",
+    "short": "short-type setup",
     "unclear": "direction unclear",
     "not_directional": "not directional — can this report be trusted?",
 }
@@ -16,7 +16,9 @@ _CASE_LABEL = {
 
 def _render_gate(gate: dict) -> str:
     case = gate.get("case")
-    lines = [f"  [{gate['gate']}] {'PASS' if gate['passed'] else 'FAIL'}" + (f"  ({_CASE_LABEL[case]})" if case else "")]
+    met = sum(1 for c in gate["conditions"] if c["status"] == "pass")
+    header = f"  [{gate['gate']}] {'PASS' if gate['passed'] else 'FAIL'}  {met}/{len(gate['conditions'])} checks met"
+    lines = [header + (f"  ({_CASE_LABEL[case]})" if case else "")]
     for c in gate["conditions"]:
         marker = {"pass": "OK ", "fail": "FAIL", "unknown": "?  "}[c["status"]]
         lines.append(f"    {marker} {c['name']}: {c['computed_value']} (threshold {c['threshold']}) — {c['detail']}")

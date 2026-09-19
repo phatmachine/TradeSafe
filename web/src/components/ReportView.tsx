@@ -1,12 +1,38 @@
 import { AnalysisReport } from "../api";
+import { readable } from "../format";
 import { GateCard } from "./GateCard";
 
-const VERDICT_COPY: Record<string, { label: string; className: string }> = {
-  ELIGIBLE_SETUP: { label: "Eligible setup found", className: "eligible" },
-  NO_SETUP: { label: "No setup qualifies", className: "no_setup" },
-  GATE_FAIL: { label: "Gate failed — data or universe", className: "gate_fail" },
-  CLASSIFIER_CONFLICT: { label: "Classifier conflict — trading nothing", className: "classifier_conflict" },
+const VERDICT_COPY: Record<string, { label: string; className: string; explain: string }> = {
+  ELIGIBLE_SETUP: {
+    label: "Eligible setup found",
+    className: "eligible",
+    explain:
+      "The data passed every trust check and at least one setup has all its checks met. See which one under Setup evaluation, and what it implies under Structural read.",
+  },
+  NO_SETUP: {
+    label: "No setup qualifies",
+    className: "no_setup",
+    explain:
+      "The data passed every trust check, but none of the setups has all its checks met right now. This is a real \"no\", not missing data.",
+  },
+  GATE_FAIL: {
+    label: "Gate failed — data or universe",
+    className: "gate_fail",
+    explain:
+      "A trust check failed, so no setups were evaluated. Either this coin doesn't meet the basic bar for analysis, or the data isn't trustworthy right now. See Gate status.",
+  },
+  CLASSIFIER_CONFLICT: {
+    label: "Classifier conflict — trading nothing",
+    className: "classifier_conflict",
+    explain:
+      "Two setups that should never qualify together both did, so the report declines to pick either.",
+  },
 };
+
+// With the regime undetermined the report stops before any setup runs, so "no setup
+// qualifies" means something different: nothing was checked, rather than nothing passed.
+const UNDETERMINED_EXPLAIN =
+  "The data passed every trust check, but the market regime couldn't be classified, so no setups were checked.";
 
 const LEAN_LABEL: Record<string, string> = {
   supports_long: "▲ Supports long",
@@ -22,15 +48,29 @@ const BIAS_LABEL: Record<string, string> = {
 };
 
 export function ReportView({ report }: { report: AnalysisReport }) {
-  const verdict = VERDICT_COPY[report.verdict] || { label: report.verdict, className: "no_setup" };
+  const verdict = VERDICT_COPY[report.verdict] || { label: report.verdict, className: "no_setup", explain: "" };
   const di = report.data_integrity;
   const sc = report.state_classification;
+  const explain =
+    report.verdict === "NO_SETUP" && report.setup_evaluation.length === 0 ? UNDETERMINED_EXPLAIN : verdict.explain;
+  const gatesPassed = report.gate_status.filter((g) => g.passed).length;
+  const setupsPresent = report.setup_evaluation.filter((s) => s.passed).length;
 
   return (
     <div>
       <div className={`verdict-banner ${verdict.className}`}>
         <div className="verdict-label">{report.instrument}</div>
         <div className="verdict-value">{verdict.label}</div>
+        {explain && <div className="verdict-explain">{explain}</div>}
+        <div className="verdict-tally">
+          <span>
+            Trust checks <b>{gatesPassed} of {report.gate_status.length}</b> passed
+          </span>
+          <span>
+            Setups present{" "}
+            <b>{report.setup_evaluation.length ? `${setupsPresent} of ${report.setup_evaluation.length}` : "none checked"}</b>
+          </span>
+        </div>
         <div className="verdict-meta mono">
           as of {new Date(report.as_of).toLocaleString()} · config {report.config_hash}
         </div>
@@ -42,6 +82,10 @@ export function ReportView({ report }: { report: AnalysisReport }) {
 
       <div className="section">
         <div className="section-title">Gate status</div>
+        <div className="section-intro">
+          Trust checks that run first. Both must pass before any setup is looked at. If one fails, nothing further down
+          can be relied on.
+        </div>
         {report.gate_status.map((g) => (
           <GateCard gate={g} key={g.gate} />
         ))}
@@ -129,6 +173,20 @@ export function ReportView({ report }: { report: AnalysisReport }) {
       {report.setup_evaluation.length > 0 && (
         <div className="section">
           <div className="section-title">Setup evaluation</div>
+          <div className="section-intro">
+            Each setup is a market pattern this app looks for. It counts as present only when <b>every</b> check is met.
+            The tag shows which way the pattern points <i>if</i> it's present. It isn't a result.
+            <div className="legend">
+              <span><span className="condition-marker pass">✓</span> met</span>
+              <span><span className="condition-marker fail">✕</span> checked, not met</span>
+              <span><span className="condition-marker unknown">?</span> not enough data to check</span>
+            </div>
+            {sc?.regime && (
+              <div>
+                Which setups run depends on the market regime, currently <b>{sc.regime.replace(/_/g, " ")}</b>.
+              </div>
+            )}
+          </div>
           {report.setup_evaluation.map((s) => (
             <GateCard gate={s} key={s.gate} />
           ))}
@@ -166,8 +224,8 @@ export function ReportView({ report }: { report: AnalysisReport }) {
                 <div className="flip-title">
                   [{f.gate.replace(/_/g, " ")}] {f.condition.replace(/_/g, " ")}
                 </div>
-                <div className="flip-detail mono">
-                  currently {f.current_value ?? "unknown"} · needs {f.required ?? "—"}
+                <div className="flip-detail mono" title={`currently ${f.current_value ?? "unknown"} · needs ${f.required ?? "—"}`}>
+                  currently {f.current_value == null ? "unknown" : readable(f.current_value)} · needs {readable(f.required)}
                 </div>
                 <div className="flip-detail">{f.detail}</div>
               </div>

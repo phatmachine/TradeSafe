@@ -191,6 +191,23 @@ body {
   letter-spacing: -0.01em;
 }
 
+.verdict-explain {
+  margin-top: 8px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.verdict-tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.verdict-tally b { color: var(--text); }
+
 .verdict-meta {
   margin-top: 10px;
   font-size: 12px;
@@ -237,6 +254,22 @@ body {
   margin-bottom: 10px;
 }
 
+.section-intro {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-faint);
+  margin: -4px 0 10px;
+}
+.section-intro b { color: var(--text-dim); }
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 6px 0;
+}
+.legend .condition-marker { margin-right: 4px; }
+
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -249,6 +282,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   margin-bottom: 10px;
 }
 
@@ -269,6 +303,33 @@ body {
 .pill.pass { background: rgba(200,241,105,0.18); color: var(--accent); }
 .pill.fail { background: rgba(255,107,94,0.18); color: var(--red); }
 .pill.unknown { background: rgba(154,156,146,0.18); color: var(--text-dim); }
+/* A setup that isn't present is the normal state, not an error — kept neutral, unlike a failed gate. */
+.pill.absent { background: rgba(154,156,146,0.18); color: var(--text-dim); white-space: nowrap; }
+
+/* Checks-met tally on each card: one pip per check, coloured by its status. */
+.score {
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.score-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+.pips { display: inline-flex; gap: 4px; }
+.pip {
+  width: 18px;
+  height: 6px;
+  border-radius: 3px;
+}
+.pip.pass { background: var(--accent); }
+.pip.fail { background: var(--red); }
+.pip.unknown { background: transparent; border: 1px solid var(--text-faint); }
+.score-text { font-size: 13px; font-weight: 600; }
+.score-summary { font-size: 12px; color: var(--text-faint); margin-top: 4px; }
 
 .condition-row {
   display: flex;
