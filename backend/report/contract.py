@@ -206,6 +206,11 @@ def _data_integrity_summary(instrument: str, ds: DataSource, registry: SourceReg
         if sid in used_sources:
             continue
         rec = registry.get(sid)
+        if rec and not rec.is_rejected and set(rec.metrics) <= {Metric.EVENT.value}:
+            # Calendar sources give dated, market-wide events that the event setup reads
+            # as history — never a current reading of this coin — so their absence from
+            # `clean` is not a rejection.
+            continue
         reason = "demoted (repeat failure)" if rec and rec.is_rejected else "no current observation"
         rejected.append({"source_id": sid, "reason": reason})
 

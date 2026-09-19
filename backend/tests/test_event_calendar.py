@@ -9,6 +9,8 @@ from decimal import Decimal
 
 from backend.core.config import load_config
 from backend.core.observation import MACRO, Metric, Observation, Tier, Unit
+from backend.core.registry import SourceRegistry
+from backend.report.contract import _data_integrity_summary
 from backend.service import collector
 from backend.setups import event
 from backend.sources import calendar
@@ -129,6 +131,13 @@ def test_an_old_event_or_mixed_positioning_does_not_qualify():
     mixed = [funding(v, CPI_AT - timedelta(minutes=15 * k + 5)) for k, v in enumerate((0.03, -0.03, 0.03, 0.03), 1)]
     result = event.evaluate("ZEC", event_history=[ev(CPI_AT)], funding_history=mixed, as_of=AS_OF, cfg=cfg)
     assert result.conditions[1].status == "fail"
+
+
+def test_calendar_sources_are_not_listed_as_rejected_for_a_coin():
+    summary = _data_integrity_summary("BTC", None, SourceRegistry.from_config(load_config()), clean=[])
+    rejected = {r["source_id"] for r in summary["sources_rejected"]}
+    assert "binance_futures" in rejected  # a price source with no current reading still is
+    assert not rejected & {"fred", "fed_fomc_calendar"}
 
 
 def test_no_event_is_unknown_not_a_pass():
