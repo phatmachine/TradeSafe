@@ -168,6 +168,10 @@ and setup code over ~3.7 years of free history (~3 min). Findings, 2026-09-19:
 
 - `gate_u.reference_intended_size_coins: 1.0` is a placeholder for the real trade size;
   until set, the order-book depth check passes trivially.
+- TAO and XRP always `GATE_FAIL` (every report since they were first looked up): no
+  chain source or market-cap mapping is configured for them, so `t1_connectivity`
+  fails and OI-to-market-cap / free float are unknown. A config/adapter gap
+  (`backend/config/instruments.yaml`, non-EVM chains), not a threshold problem.
 - The research harness has no liquidation history, so cascade/squeeze haven't been
   back-tested with the new "settled" rule; Coinalyze hourly data covers ~3 months.
 - Swing-timeframe direction signals (daily-chart trend, multi-day funding, OI trend,
