@@ -1,11 +1,13 @@
-"""One-time backfill of history from Binance's public futures endpoints, so nothing has
-to wait weeks after a fresh collector start. This is real historical exchange data,
-fetched in bulk after the fact rather than waited for one poll at a time — not a
-synthetic or inferred value, and not a threshold change.
+"""Backfill of history from Binance's public futures endpoints, so nothing has to wait
+weeks after a fresh collector start. This is real historical exchange data, fetched in
+bulk after the fact rather than waited for one poll at a time — not a synthetic or
+inferred value, and not a threshold change.
 
 - Price (klines): realised_vol_in_band (Gate U condition 6 — needs ~30 days of
   single-venue daily closes) and regime classification (Layer 2.1 — needs enough 4h bars
-  to confirm swing structure).
+  to confirm swing structure). Fills the whole window on a first run and, after that,
+  any 4h bar the collector wasn't running for: a missing bar shifts which closes count
+  as swing points, and six missing bars were enough to flip ZEC's regime.
 - Coin open interest (openInterestHist, added 2026-09-18): the OI-vs-price factor, the
   cascade/squeeze flush check, trend continuation's "OI falls during the retrace", and
   the calibration sweep. Binance serves only the latest 30 days of this endpoint, so a
@@ -50,25 +52,59 @@ DAYS = 35
 # against the 3 required, so BTC and ETH classified UNDETERMINED — which blocks every
 # setup — despite both satisfying the trend's volatility and direction conditions.
 INTERVAL = "4h"
+BAR_SECONDS = 4 * 3600
 BARS_PER_DAY = 6
 LIMIT = DAYS * BARS_PER_DAY
 
 
-def _existing_backfill_count(conn, instrument: str) -> int:
-    row = conn.execute(
-        "SELECT COUNT(*) FROM observations WHERE instrument = ? AND source_id = ?",
-        (instrument, SOURCE_ID),
-    ).fetchone()
-    return row[0] if row else 0
+def _bar(at: datetime) -> int:
+    return int(at.timestamp() // BAR_SECONDS)
+
+
+def _missing_bars(conn, instrument: str, now: datetime) -> set[int]:
+    """Closed 4h bars inside the window with no Binance price reading at all: the whole
+    window on a first run, afterwards any stretch the collector wasn't running for.
+    Compaction keeps a reading per 15 minutes, so a bar the collector covered never reads
+    as missing, and repeat calls cost one indexed query with no request."""
+    since = now - timedelta(days=DAYS)
+    hours = conn.execute(
+        """SELECT DISTINCT substr(observed_at, 1, 13) FROM observations
+           WHERE instrument = ? AND metric = ? AND venue = ? AND observed_at >= ?""",
+        (instrument, Metric.PRICE.value, VENUE, since.isoformat()),
+    ).fetchall()
+    have = {_bar(datetime.fromisoformat(f"{h[0]}:00:00+00:00")) for h in hours}
+    first = _bar(since) + 1  # the first bar wholly inside the window
+    earliest = conn.execute(
+        "SELECT MIN(observed_at) FROM observations WHERE instrument = ? AND metric = ? AND source_id = ?",
+        (instrument, Metric.PRICE.value, SOURCE_ID),
+    ).fetchone()[0]
+    if earliest:
+        # Bars older than Binance's own first one (a recent listing) can never be filled,
+        # so they must not count as missing or every call would re-request them.
+        first = max(first, _bar(datetime.fromisoformat(earliest)))
+    return {b for b in range(first, _bar(now)) if b not in have}
+
+
+def _drop_unclosed_bars(conn, instrument: str) -> None:
+    """Earlier versions also stored the bar still forming at fetch time, stamped with its
+    future close time but holding only the price at that moment. Stamped later than any
+    live tick in its bar, it permanently stood in for that bar's real close."""
+    params = (instrument, Metric.PRICE.value, SOURCE_ID)
+    where = "instrument = ? AND metric = ? AND source_id = ? AND observed_at > collected_at"
+    if conn.execute(f"SELECT 1 FROM observations WHERE {where} LIMIT 1", params).fetchone():
+        conn.execute(f"DELETE FROM observations WHERE {where}", params)
 
 
 def backfill(instrument: str, cfg: Config, *, client: httpx.Client) -> int:
     instrument = instrument.upper()
     sym = default_usdt_symbols(instrument)
+    now = datetime.now(timezone.utc)
 
     with db.get_connection() as conn:
-        if _existing_backfill_count(conn, instrument) >= LIMIT:
-            return 0
+        _drop_unclosed_bars(conn, instrument)
+        missing = _missing_bars(conn, instrument, now)
+    if not missing:
+        return 0
 
     try:
         resp = client.get(
@@ -88,6 +124,9 @@ def backfill(instrument: str, cfg: Config, *, client: httpx.Client) -> int:
     with db.get_connection() as conn:
         for row in klines:
             close_time_ms, close_price = row[6], row[4]
+            closes_at = parse_ms_timestamp(close_time_ms)
+            if closes_at >= now or _bar(closes_at) not in missing:
+                continue  # still forming, or a bar the collector already covers
             obs = Observation.build(
                 metric=Metric.PRICE,
                 instrument=instrument,
@@ -96,7 +135,7 @@ def backfill(instrument: str, cfg: Config, *, client: httpx.Client) -> int:
                 venue=VENUE,
                 source_id=SOURCE_ID,
                 tier=Tier.T1,
-                observed_at=parse_ms_timestamp(close_time_ms),
+                observed_at=closes_at,
                 cfg=cfg,
                 raw={"kline": row},
             )
@@ -185,6 +224,19 @@ def backfill_open_interest(instrument: str, cfg: Config, *, client: httpx.Client
     return inserted
 
 
+def bootstrap(instrument: str, cfg: Config) -> None:
+    """Best-effort: both backfills, with a venue failure left for the next call to retry.
+    Called before every analysis (on-demand report and scheduled scan) — each backfill
+    checks what's stored before making any request, so this is cheap when nothing is
+    missing."""
+    with httpx.Client() as client:
+        for fn in (backfill, backfill_open_interest):
+            try:
+                fn(instrument, cfg, client=client)
+            except SourceError:
+                pass
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         print("usage: python -m backend.scripts.backfill_history <SYMBOL> [SYMBOL ...]", file=sys.stderr)
@@ -200,7 +252,7 @@ def main() -> None:
                     print(f"{symbol.upper()}: {label} backfill failed: {exc}", file=sys.stderr)
                     continue
                 if n == 0:
-                    print(f"{symbol.upper()}: {label} already backfilled, skipped")
+                    print(f"{symbol.upper()}: {label} already complete, skipped")
                 else:
                     print(f"{symbol.upper()}: inserted {n} historical {label}")
 

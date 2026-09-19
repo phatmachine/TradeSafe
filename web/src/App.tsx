@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { api, AnalysisReport, ApiError } from "./api";
+import { AlertCenter } from "./components/AlertCenter";
 import { Login } from "./components/Login";
 import { ReportView } from "./components/ReportView";
 
@@ -54,6 +55,11 @@ export default function App() {
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     runReport(symbol);
+  }
+
+  async function openFromAlert(sym: string) {
+    await runReport(sym);
+    document.getElementById("report")?.scrollIntoView({ behavior: "smooth" });
   }
 
   async function logout() {
@@ -124,13 +130,15 @@ export default function App() {
         </div>
       )}
 
+      <AlertCenter onOpen={openFromAlert} />
+
       {error && <div className="error-box">{error}</div>}
 
       {!report && !error && !loading && (
         <div className="state-msg">Name an instrument above to run it through Gate U and Layer 0.</div>
       )}
 
-      {report && <ReportView report={report} />}
+      <div id="report">{report && <ReportView report={report} />}</div>
     </div>
   );
 }

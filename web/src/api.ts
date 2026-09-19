@@ -76,6 +76,32 @@ export interface AnalysisReport {
   directional_factors?: DirectionalFactor[];
 }
 
+export interface SetupAlert {
+  id: number;
+  instrument: string;
+  setup: string;
+  setup_case: GateCase | null;
+  verdict: string;
+  verdict_bias: Direction | null;
+  run_id: string | null;
+  as_of: string;
+  created_at: string;
+  is_test: boolean;
+}
+
+export interface ScanRun {
+  finished_at: string;
+  instruments: number;
+  new_alerts: number;
+  errors: string;
+}
+
+export interface AlertsResponse {
+  alerts: SetupAlert[];
+  latest_id: number;
+  scanner: { interval_minutes: number; last_run: ScanRun | null; watched: number };
+}
+
 const BASE = "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -107,4 +133,6 @@ export const api = {
   addInstrument: (symbol: string) => request<{ ok: boolean; instrument: string }>(`/api/instruments/${symbol}`, { method: "POST" }),
   report: (symbol: string) => request<AnalysisReport>(`/api/report/${symbol}`),
   reportHistory: (symbol: string) => request<{ records: Record<string, unknown>[] }>(`/api/report/${symbol}/history`),
+  alerts: (after = 0) => request<AlertsResponse>(`/api/alerts?after=${after}`),
+  testAlert: () => request<SetupAlert>("/api/alerts/test", { method: "POST" }),
 };

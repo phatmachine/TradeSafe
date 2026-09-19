@@ -93,6 +93,36 @@ CREATE TABLE IF NOT EXISTS positions (
     status TEXT NOT NULL DEFAULT 'open',
     closed_at TEXT
 );
+
+-- Scheduled scan (service/scanner.py): one alert each time a setup starts qualifying.
+CREATE TABLE IF NOT EXISTS alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    instrument TEXT NOT NULL,
+    setup TEXT NOT NULL,
+    setup_case TEXT,
+    verdict TEXT NOT NULL,
+    verdict_bias TEXT,
+    run_id TEXT,
+    as_of TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    is_test INTEGER NOT NULL DEFAULT 0
+);
+
+-- The setups qualifying at each instrument's last conclusive scan, so a setup alerts once
+-- when it starts qualifying rather than on every scan while it keeps qualifying.
+CREATE TABLE IF NOT EXISTS scan_state (
+    instrument TEXT NOT NULL,
+    setup TEXT NOT NULL,
+    PRIMARY KEY (instrument, setup)
+);
+
+CREATE TABLE IF NOT EXISTS scan_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    finished_at TEXT NOT NULL,
+    instruments INTEGER NOT NULL,
+    new_alerts INTEGER NOT NULL,
+    errors TEXT NOT NULL DEFAULT ''
+);
 """
 
 
@@ -480,3 +510,66 @@ def close_position(conn: sqlite3.Connection, position_id: str, *, at: datetime) 
         "UPDATE positions SET status = 'closed', closed_at = ? WHERE position_id = ?",
         (_iso(at), position_id),
     )
+
+
+def get_qualifying_setups(conn: sqlite3.Connection, instrument: str) -> set[str]:
+    rows = conn.execute("SELECT setup FROM scan_state WHERE instrument = ?", (instrument,)).fetchall()
+    return {r["setup"] for r in rows}
+
+
+def set_qualifying_setups(conn: sqlite3.Connection, instrument: str, setups: set[str]) -> None:
+    conn.execute("DELETE FROM scan_state WHERE instrument = ?", (instrument,))
+    conn.executemany(
+        "INSERT INTO scan_state (instrument, setup) VALUES (?, ?)", [(instrument, s) for s in sorted(setups)]
+    )
+
+
+def _alert_dict(row: sqlite3.Row) -> dict:
+    d = dict(row)
+    d["is_test"] = bool(d["is_test"])
+    return d
+
+
+def insert_alert(conn: sqlite3.Connection, alert: dict) -> dict:
+    cur = conn.execute(
+        """INSERT INTO alerts
+           (instrument, setup, setup_case, verdict, verdict_bias, run_id, as_of, created_at, is_test)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            alert["instrument"],
+            alert["setup"],
+            alert.get("setup_case"),
+            alert["verdict"],
+            alert.get("verdict_bias"),
+            alert.get("run_id"),
+            alert["as_of"],
+            _iso(datetime.now(timezone.utc)),
+            1 if alert.get("is_test") else 0,
+        ),
+    )
+    return _alert_dict(conn.execute("SELECT * FROM alerts WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+
+def list_alerts(conn: sqlite3.Connection, *, after_id: int = 0, limit: int = 20) -> list[dict]:
+    """Newest first. `after_id` returns only alerts newer than one the caller has seen."""
+    rows = conn.execute(
+        "SELECT * FROM alerts WHERE id > ? ORDER BY id DESC LIMIT ?", (after_id, limit)
+    ).fetchall()
+    return [_alert_dict(r) for r in rows]
+
+
+def latest_alert_id(conn: sqlite3.Connection) -> int:
+    row = conn.execute("SELECT MAX(id) FROM alerts").fetchone()
+    return row[0] or 0
+
+
+def record_scan_run(conn: sqlite3.Connection, *, instruments: int, new_alerts: int, errors: str = "") -> None:
+    conn.execute(
+        "INSERT INTO scan_runs (finished_at, instruments, new_alerts, errors) VALUES (?, ?, ?, ?)",
+        (_iso(datetime.now(timezone.utc)), instruments, new_alerts, errors),
+    )
+
+
+def last_scan_run(conn: sqlite3.Connection) -> dict | None:
+    row = conn.execute("SELECT * FROM scan_runs ORDER BY id DESC LIMIT 1").fetchone()
+    return dict(row) if row else None

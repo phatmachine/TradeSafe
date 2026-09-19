@@ -302,9 +302,10 @@ async def main() -> None:
                 db.add_watched_instrument(conn, sym)
         instruments = db.list_watched_instruments(conn)
 
-    # One-off per instrument, and cheap to repeat on every restart (backfill() checks
-    # existing row counts before making a network call) — see backfill_history's
-    # docstring for why this can't just be "wait a month" on a fresh deployment.
+    # Fills a fresh instrument's history and any 4h bars missed while the collector was
+    # down, and is cheap to repeat on every restart (each backfill checks what's stored
+    # before making a network call) — see backfill_history's docstring for why this can't
+    # just be "wait a month" on a fresh deployment.
     cfg = load_config()
     with httpx.Client() as backfill_client:
         for sym in instruments:

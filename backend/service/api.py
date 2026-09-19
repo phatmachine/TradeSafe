@@ -1,5 +1,5 @@
-"""The analysis API. Runs on demand (plus a daily scheduled pass could hit /report),
-reads only from the store, and never talks to a venue directly — that separation is what
+"""The analysis API. Runs on demand, plus the scheduled setup scan (service/scanner.py)
+as a background task, reads only from the store, and never talks to a venue directly — that separation is what
 keeps the live path and the replay path on identical code (implementation spec, "Two
 services, two lifecycles"). Every route that isn't /health or /api/auth/* requires the
 single shared-password session.
@@ -22,9 +22,8 @@ from backend.report.contract import persist_report, run_analysis
 from backend.report.exit_monitor import evaluate_exit
 from backend.report.render import render_text
 from backend.scripts import backfill_history
-from backend.service import auth
+from backend.service import auth, scanner
 from backend.service.collector import collect_once
-from backend.sources.base import SourceError
 from backend.store import db
 
 app = FastAPI(title="TradeSafe evidence API", version="1.0")
@@ -37,9 +36,19 @@ app.add_middleware(
 )
 
 
+_scanner_stop = asyncio.Event()
+
+
 @app.on_event("startup")
-def _startup() -> None:
+async def _startup() -> None:
     db.init_db()
+    app.state.scanner = asyncio.create_task(scanner.scan_loop(_scanner_stop))
+
+
+@app.on_event("shutdown")
+async def _shutdown() -> None:
+    _scanner_stop.set()
+    await app.state.scanner
 
 
 def require_auth(tradesafe_session: str | None = Cookie(default=None)) -> None:
@@ -103,12 +112,7 @@ def _bootstrap_history(symbol: str, cfg) -> None:
     the latter left first-time lookups waiting for a collector restart. Both backfills
     check what's stored before making any network call, so repeat calls are a single
     indexed query each."""
-    with httpx.Client() as client:
-        for fn in (backfill_history.backfill, backfill_history.backfill_open_interest):
-            try:
-                fn(symbol, cfg, client=client)
-            except SourceError:
-                pass
+    backfill_history.bootstrap(symbol, cfg)
 
 
 @app.post("/api/instruments/{symbol}", dependencies=[Depends(require_auth)])
@@ -158,6 +162,39 @@ def get_report_text(symbol: str):
         persist_report(conn, report)
         db.add_watched_instrument(conn, symbol)
     return Response(content=render_text(report), media_type="text/plain")
+
+
+@app.get("/api/alerts", dependencies=[Depends(require_auth)])
+def list_alerts(after: int = 0, limit: int = 20):
+    """What an open browser tab polls: alerts newer than `after` (newest first), plus
+    enough scanner state to show the scan is actually running."""
+    with db.get_connection() as conn:
+        return {
+            "alerts": db.list_alerts(conn, after_id=after, limit=min(limit, 100)),
+            "latest_id": db.latest_alert_id(conn),
+            "scanner": {
+                "interval_minutes": scanner.interval_seconds() / 60,
+                "last_run": db.last_scan_run(conn),
+                "watched": len(db.list_watched_instruments(conn)),
+            },
+        }
+
+
+@app.post("/api/alerts/test", dependencies=[Depends(require_auth)])
+def create_test_alert():
+    """Stores a test alert through the same table the scanner writes, so the next poll
+    delivers it by the same path a real one takes."""
+    with db.get_connection() as conn:
+        return db.insert_alert(
+            conn,
+            {
+                "instrument": "TEST",
+                "setup": "test_alert",
+                "verdict": "TEST",
+                "as_of": datetime.now(timezone.utc).isoformat(),
+                "is_test": True,
+            },
+        )
 
 
 @app.get("/api/report/{symbol}/history", dependencies=[Depends(require_auth)])
