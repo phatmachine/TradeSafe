@@ -17,6 +17,7 @@ responsible for the regime gate, this module only evaluates its own conditions.
 """
 from __future__ import annotations
 
+import statistics
 from datetime import timedelta
 from decimal import Decimal
 
@@ -53,6 +54,8 @@ def evaluate(
     stab_periods = int(cfg.get("cascade", "stab_periods", default=3))
     funding_periods = int(cfg.get("funding_periods", default=3))
     quiet_minutes = float(cfg.get("cascade", "liquidation_quiet_minutes", default=60))
+    baseline_days = float(cfg.get("cascade", "liquidation_baseline_days", default=7))
+    settled_multiple = Decimal(str(cfg.get("cascade", "liquidation_settled_multiple", default=1.0)))
 
     conditions: list[ConditionResult] = []
 
@@ -166,35 +169,76 @@ def evaluate(
             )
         )
 
-    # --- liquidation print settled ------------------------------------------------
-    liq_obs = [o for o in liquidation_history if o.metric == Metric.LIQUIDATION]
-    if not liq_obs:
-        # UNKNOWN, not pass: an empty liquidation history over the caller's whole
-        # lookback cannot distinguish "the tape genuinely went quiet" (which is what this
-        # condition wants to confirm) from "the feed has never delivered a row", and
-        # treating the second as a pass would let the doctrine's highest-conviction setup
-        # fire with no liquidation evidence behind it at all. Unknown is a distinct state
-        # and is never null-coalesced to a default (gates/common.py).
-        conditions.append(
-            ConditionResult(
-                name="liquidation_print_settled",
-                status="unknown",
-                computed_value=None,
-                threshold=f"{quiet_minutes} min quiet",
-                detail="no liquidation prints in the lookback at all — cannot tell a quiet tape from an absent feed",
-            )
+    conditions.append(
+        _liquidation_settled(
+            [o for o in liquidation_history if o.metric == Metric.LIQUIDATION],
+            as_of=as_of,
+            quiet_minutes=quiet_minutes,
+            baseline_days=baseline_days,
+            multiple=settled_multiple,
         )
-    else:
-        most_recent = max(o.observed_at for o in liq_obs)
-        quiet_for = (as_of - most_recent).total_seconds() / 60
-        conditions.append(
-            ConditionResult(
-                name="liquidation_print_settled",
-                status="pass" if quiet_for >= quiet_minutes else "fail",
-                computed_value=quiet_for,
-                threshold=quiet_minutes,
-                detail="minutes since the most recent liquidation print",
-            )
-        )
+    )
 
     return GateResult(gate=SETUP_NAME if is_long else SHORT_SETUP_NAME, conditions=tuple(conditions))
+
+
+def _liquidation_settled(
+    liq_obs: list[Observation], *, as_of, quiet_minutes: float, baseline_days: float, multiple: Decimal
+) -> ConditionResult:
+    """"Liquidation print settled" read as back to the coin's usual level, not silence.
+    Some exchange prints a liquidation in nearly every hour, so "none for 60 minutes"
+    held in 2-10% of hours across the three exchanges watched, and got rarer with each
+    exchange added: it measured coverage more than the market (thresholds.yaml has the
+    numbers). This passes when the last `quiet_minutes` of liquidations total no more
+    than `multiple` x the median hour over the previous `baseline_days`.
+
+    Both sides of that comparison are summed over the same exchanges: those with history
+    back to the start of the baseline (so an exchange added last week can't inflate the
+    recent hour against a baseline it isn't in) and a print within the last day (so a
+    feed that has gone quiet drops out of both sides rather than making the recent hour
+    look calm). With no such exchange the answer is unknown, never a pass."""
+    name = "liquidation_print_settled"
+    threshold_text = f"<= {multiple}x the median hour over {baseline_days:g} days"
+    baseline_start = as_of - timedelta(days=baseline_days)
+    by_venue: dict[str, list[Observation]] = {}
+    for o in liq_obs:
+        if o.observed_at <= as_of:
+            by_venue.setdefault(o.venue, []).append(o)
+    venues = sorted(
+        v
+        for v, rows in by_venue.items()
+        if min(r.observed_at for r in rows) <= baseline_start
+        and max(r.observed_at for r in rows) >= as_of - timedelta(hours=24)
+    )
+    if not venues:
+        return ConditionResult(
+            name=name,
+            status="unknown",
+            computed_value=None,
+            threshold=threshold_text,
+            detail=f"needs {baseline_days:g} days of liquidation history from at least one exchange that is still reporting",
+        )
+
+    recent_start = as_of - timedelta(minutes=quiet_minutes)
+    hours = int(baseline_days * 24)
+    hourly = [Decimal(0)] * hours
+    recent = Decimal(0)
+    for v in venues:
+        for o in by_venue[v]:
+            if o.observed_at > recent_start:
+                recent += abs(o.value)
+                continue
+            idx = int((recent_start - o.observed_at).total_seconds() // 3600)
+            if idx < hours:
+                hourly[idx] += abs(o.value)
+    usual = statistics.median(hourly)
+    return ConditionResult(
+        name=name,
+        status="pass" if recent <= usual * multiple else "fail",
+        computed_value=recent.quantize(Decimal(1)),
+        threshold=(usual * multiple).quantize(Decimal(1)),
+        detail=(
+            f"USD liquidated in the last {quiet_minutes:g} min on {', '.join(venues)}, against "
+            f"{multiple}x their median hour over {baseline_days:g} days"
+        ),
+    )

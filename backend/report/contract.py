@@ -289,11 +289,17 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
     funding_hist = [o for o in all_history if o.metric == Metric.FUNDING_8H]
     event_hist = [o for o in all_history if o.metric == Metric.EVENT]
     # Liquidations are discrete prints (never compacted) and the busiest coins log
-    # thousands a day, so they're read over the cohort window only — the widest window
-    # anything here looks at them over — not the 30 days the level series need.
+    # thousands a day, so they're read only as far back as anything here looks at them —
+    # the cohort window or the print-settled baseline, plus a day so that baseline can
+    # tell an exchange reporting from before it began — not the 30 days the level series
+    # need.
+    liq_lookback_hours = max(
+        float(cfg.get("liq_window_hours", default=72)),
+        (float(cfg.get("cascade", "liquidation_baseline_days", default=7)) + 1) * 24,
+    )
     liq_hist = ds.observations_including_expired(
         instrument,
-        lookback_seconds=float(cfg.get("liq_window_hours", default=72)) * 3600,
+        lookback_seconds=liq_lookback_hours * 3600,
         metrics=(Metric.LIQUIDATION,),
     )
 

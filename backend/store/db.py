@@ -326,6 +326,15 @@ def earliest_observed_at(conn: sqlite3.Connection, *, instrument: str) -> dateti
     return _dt(row[0]) if row and row[0] else None
 
 
+def earliest_liquidation(conn: sqlite3.Connection, *, instrument: str, venue: str) -> datetime | None:
+    """When this venue's stored liquidations for the instrument begin, from any source."""
+    row = conn.execute(
+        "SELECT MIN(observed_at) FROM observations WHERE instrument = ? AND metric = ? AND venue = ?",
+        (instrument, Metric.LIQUIDATION.value, venue),
+    ).fetchone()
+    return _dt(row[0]) if row and row[0] else None
+
+
 def latest_observed_at(
     conn: sqlite3.Connection, *, instrument: str, metric: Metric, source_id: str
 ) -> datetime | None:

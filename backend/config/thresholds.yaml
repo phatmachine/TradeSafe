@@ -104,7 +104,23 @@ cascade:
   flush_range_pct: 0.03       # price range contraction threshold (of price) post-flush
   stab_periods: 3             # consecutive closes required above the flush-wick low
   spent_band_pct: 0.05        # "premise spent": coin OI back within this band of pre-flush level
-  liquidation_quiet_minutes: 60  # "liquidation print settled": no fresh prints inside this window
+  # "Liquidation print settled" = the last liquidation_quiet_minutes of liquidations are
+  # back to the coin's usual level: at most liquidation_settled_multiple x the median hour
+  # over the previous liquidation_baseline_days, on the same exchanges (setups/cascade.py).
+  # REDEFINED 2026-09-19 from "no prints at all for 60 minutes", which measured coverage
+  # more than the market. Hours with no liquidation on any of Binance/Bybit/OKX, ~3.5
+  # months of Coinalyze hourly data: BTC 2.7%, ETH 2.3%, SOL 10.1%, ZEC 4.6% (OKX alone:
+  # 16-24%); over the last day the old rule held 0% on all four with all three exchanges.
+  # Baseline length, same data, rule "last hour <= 1.0x median hour": 3 and 7 days behave
+  # alike on every coin (~50% of hours pass; median 3h from a >=5x spike back to a pass;
+  # ~33-42% pass in the 6h after a spike). At 14 and 30 days ZEC, whose activity rose
+  # sharply, failed to pass within 72h of 18 and 24 spikes: a long baseline goes stale.
+  # 7 days sits on the plateau. 1.0x is the plain reading of "usual" (the median hour),
+  # not fitted to outcomes: the multiple is the value to sweep once the research harness
+  # has liquidation history.
+  liquidation_quiet_minutes: 60
+  liquidation_baseline_days: 7
+  liquidation_settled_multiple: 1.0
   bar_seconds: 900             # bar size used for OI-series / flush-bar detection (15 min)
 
 # Layer 0 measurement rule: OI-weighted funding at or below zero for this many

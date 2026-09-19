@@ -99,8 +99,9 @@ def _squeeze_inputs(cfg, funding_value):
     closes = [100, 110, 112, 108, 107, "107.5"]
     price = [obs(cfg, Metric.PRICE, c, Unit.USD, at(len(closes) - 1 - i)) for i, c in enumerate(closes)]
     funding = [obs(cfg, Metric.FUNDING_8H, funding_value, Unit.PCT_8H, at(n)) for n in (2, 1, 0)]
-    # Short-liquidation prints (positive) in each 24h bucket, the latest 3h ago: settled.
-    liqs = [obs(cfg, Metric.LIQUIDATION, 5000, Unit.USD, AS_OF - timedelta(hours=h)) for h in (3, 33, 57)]
+    # Short-liquidation prints (positive) every hour for 8 days, none in the last 3 hours:
+    # back under the usual hour, so settled, and a short-dominant tape in every 24h bucket.
+    liqs = [obs(cfg, Metric.LIQUIDATION, 5000, Unit.USD, AS_OF - timedelta(hours=h)) for h in range(3, 8 * 24)]
     return dict(oi_history=oi, price_history=price, funding_history=funding, liquidation_history=liqs, as_of=AS_OF, cfg=cfg)
 
 

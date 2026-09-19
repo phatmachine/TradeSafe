@@ -248,6 +248,39 @@ async def collect_coinalyze_liquidations(
     return written
 
 
+async def backfill_coinalyze_liquidations(
+    instruments: list[str], cfg: Config, *, client: httpx.AsyncClient, now: datetime | None = None
+) -> int:
+    """Gives the print-settled baseline (setups/cascade.py) its days of history on a
+    fresh start instead of a week's wait: 15-minute totals, the finest Coinalyze keeps
+    that far back, for Binance, Bybit and OKX. Each coin and exchange is filled only up
+    to where its own stored liquidations begin, or to where the minute feed and OKX's
+    direct feed start on a cold start, so nothing overlaps them; once filled, the next
+    call finds nothing to do and makes no request."""
+    now = now or datetime.now(timezone.utc)
+    start = now - timedelta(days=float(cfg.get("cascade", "liquidation_baseline_days", default=7)) + 1)
+    live_start = now - COINALYZE_LOOKBACK
+    todo: dict[tuple[str, str], datetime] = {}
+    with db.get_connection() as conn:
+        for inst in instruments:
+            for venue in coinalyze.BACKFILL_MARKETS:
+                earliest = db.earliest_liquidation(conn, instrument=inst, venue=venue)
+                end = min(earliest, live_start) if earliest else live_start
+                if end - start > timedelta(minutes=15):
+                    todo[(inst, venue)] = end
+    if not todo:
+        return 0
+    observations = await coinalyze.fetch_since(
+        sorted({inst for inst, _ in todo}), cfg, client=client, since=start, now=now,
+        interval="15min", markets=coinalyze.BACKFILL_MARKETS,
+    )
+    keep = [o for o in observations if o.observed_at < todo.get((o.instrument, o.venue), start)]
+    with db.get_connection() as conn:
+        for obs in keep:
+            db.insert_observation(conn, obs)
+    return len(keep)
+
+
 async def coinalyze_liquidation_poll_loop(stop_event: asyncio.Event) -> None:
     """Off entirely without an API key. Failures are logged as collector_events, not
     counted against the source's reliability register (same reasoning as OKX's loop)."""
@@ -255,10 +288,27 @@ async def coinalyze_liquidation_poll_loop(stop_event: asyncio.Event) -> None:
         logger.info("collector: %s not set, so Binance/Bybit liquidations are not collected", coinalyze.API_KEY_ENV)
         return
     cfg = load_config()
+    backfilled: set[str] = set()
     async with httpx.AsyncClient() as client:
         while not stop_event.is_set():
             with db.get_connection() as conn:
                 instruments = db.list_watched_instruments(conn)
+            new = [i for i in instruments if i not in backfilled]
+            if new:
+                try:
+                    n = await backfill_coinalyze_liquidations(new, cfg, client=client)
+                    backfilled.update(new)  # a failure leaves them to retry next pass
+                    logger.info("collector: backfilled %d 15-minute liquidation totals for %s", n, ", ".join(new))
+                except SourceError as exc:
+                    logger.info("collector: coinalyze liquidation backfill failed: %s", exc)
+                except Exception:  # noqa: BLE001 - never let a bad payload stop the loop
+                    logger.exception("collector: unexpected error in coinalyze liquidation backfill")
+                # That request spent up to three calls per coin of the minute's 40.
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=60)
+                    return
+                except asyncio.TimeoutError:
+                    pass
             try:
                 n = await collect_coinalyze_liquidations(instruments, cfg, client=client)
                 if n:

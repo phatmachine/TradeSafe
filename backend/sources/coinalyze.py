@@ -2,9 +2,10 @@
 Coinalyze's free API. Both exchanges publish liquidations only over websockets, and
 websocket frames don't flow in this deployment (see sources/liquidations.py), so without
 this the largest venue's liquidations never reach the store at all. OKX keeps its own
-direct feed (sources/okx_liquidations.py) and is not requested here, so no venue is
-counted twice. Hyperliquid is listed by Coinalyze but returned no liquidations when
-measured, so it isn't requested either.
+direct feed (sources/okx_liquidations.py); it is requested here only by the one-off
+15-minute backfill, and only for the stretch before that feed's own history begins, so
+no venue is counted twice. Hyperliquid is listed by Coinalyze but returned no
+liquidations when measured, so it isn't requested.
 
 What arrives is a per-minute total per side, not individual orders: one Observation per
 minute and side, in USD, with the sign convention of sources/liquidations.py (positive =
@@ -33,6 +34,10 @@ API_BASE = "https://api.coinalyze.net/v1"
 API_KEY_ENV = "COINALYZE_API_KEY"
 SOURCE_ID = "coinalyze"  # registered in config/sources.yaml
 MARKETS = {"binance": "{base}USDT_PERP.A", "bybit": "{base}USDT.6"}
+# The print-settled baseline needs days of history on a fresh start, so the one-off
+# backfill also covers OKX, but only for the stretch before OKX's own direct feed begins.
+BACKFILL_MARKETS = {**MARKETS, "okx": "{base}USDT_PERP.3"}
+INTERVAL_SECONDS = {"1min": 60, "15min": 900}
 MAX_SYMBOLS_PER_REQUEST = 20  # the API's own cap; each symbol costs one call of 40/min
 # How long after a minute closes before it's read as final, so a total still being
 # filled in on Coinalyze's side is never stored as that minute's whole.
@@ -43,18 +48,18 @@ def api_key() -> str | None:
     return os.environ.get(API_KEY_ENV) or None
 
 
-def symbols_for(instruments: list[str]) -> dict[str, tuple[str, str]]:
+def symbols_for(instruments: list[str], markets: dict[str, str] = MARKETS) -> dict[str, tuple[str, str]]:
     """Coinalyze symbol -> (instrument, venue). A coin an exchange doesn't list is simply
     absent from the response, so no symbol needs checking in advance."""
     return {
         fmt.format(base=inst.upper()): (inst.upper(), venue)
         for inst in instruments
-        for venue, fmt in MARKETS.items()
+        for venue, fmt in markets.items()
     }
 
 
 def to_observations(
-    series: list[dict], symbols: dict[str, tuple[str, str]], cfg: Config, *, now: datetime
+    series: list[dict], symbols: dict[str, tuple[str, str]], cfg: Config, *, now: datetime, bar_seconds: int = 60
 ) -> list[Observation]:
     out: list[Observation] = []
     for s in series:
@@ -63,7 +68,7 @@ def to_observations(
         instrument, venue = symbols[s["symbol"]]
         for row in s.get("history") or []:
             start = datetime.fromtimestamp(int(row["t"]), tz=timezone.utc)
-            end = start + timedelta(minutes=1) - timedelta(milliseconds=1)
+            end = start + timedelta(seconds=bar_seconds) - timedelta(milliseconds=1)
             if end > now - timedelta(seconds=SETTLE_SECONDS):
                 continue  # still open, or too recent to be final
             for field, sign in (("s", 1), ("l", -1)):
@@ -87,15 +92,22 @@ def to_observations(
 
 
 async def fetch_since(
-    instruments: list[str], cfg: Config, *, client: httpx.AsyncClient, since: datetime, now: datetime | None = None
+    instruments: list[str],
+    cfg: Config,
+    *,
+    client: httpx.AsyncClient,
+    since: datetime,
+    now: datetime | None = None,
+    interval: str = "1min",
+    markets: dict[str, str] = MARKETS,
 ) -> list[Observation]:
-    """Per-minute liquidations for every instrument's Binance and Bybit perpetual from
+    """Liquidation totals per `interval` for every instrument on each of `markets` from
     `since` on, oldest first. Overlaps with what's stored are the caller's to dedupe."""
     key = api_key()
     if not key:
         raise SourceError(f"{API_KEY_ENV} is not set")
     now = now or datetime.now(timezone.utc)
-    symbols = symbols_for(instruments)
+    symbols = symbols_for(instruments, markets)
     names = list(symbols)
     out: list[Observation] = []
     for i in range(0, len(names), MAX_SYMBOLS_PER_REQUEST):
@@ -105,7 +117,7 @@ async def fetch_since(
                 headers={"api_key": key},
                 params={
                     "symbols": ",".join(names[i : i + MAX_SYMBOLS_PER_REQUEST]),
-                    "interval": "1min",
+                    "interval": interval,
                     "from": int(since.timestamp()),
                     "to": int(now.timestamp()),
                     "convert_to_usd": "true",
@@ -118,5 +130,5 @@ async def fetch_since(
         payload = resp.json()
         if not isinstance(payload, list):
             raise SourceError(f"coinalyze liquidation-history returned no list: {payload}")
-        out.extend(to_observations(payload, symbols, cfg, now=now))
+        out.extend(to_observations(payload, symbols, cfg, now=now, bar_seconds=INTERVAL_SECONDS[interval]))
     return sorted(out, key=lambda o: o.observed_at)
