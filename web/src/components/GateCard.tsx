@@ -35,13 +35,24 @@ const CASE_NOTE: Partial<Record<GateCase, string>> = {
   unclear: "This setup identifies stretched positioning but doesn't encode which way it resolves.",
 };
 
-// Per-check tag. A met check inside a Long- or Short-type setup says what it means for a
-// long; an unmet one says whether the data said no or there wasn't enough data to check.
+// What a check means for a long. Only a met check inside a Long- or Short-type setup
+// points anywhere; an unmet one is just a missing piece of that setup, not evidence for
+// the other side.
+function longLean(gateCase: GateCase | undefined, c: ConditionResult) {
+  if (c.status !== "pass") return null;
+  if (gateCase === "long") return "supports_long";
+  if (gateCase === "short") return "against_long";
+  return null;
+}
+
+// Per-check tag: the long lean of a met check, or whether an unmet one was checked and
+// failed versus couldn't be checked for lack of data.
 function conditionTag(gateCase: GateCase | undefined, c: ConditionResult) {
   if (c.status === "fail") return { className: "lean-tag unmet", label: "Not met" };
   if (c.status === "unknown") return { className: "lean-tag unmet", label: "No data yet" };
-  if (gateCase === "long") return { className: "lean-tag supports_long", label: "▲ Supports long" };
-  if (gateCase === "short") return { className: "lean-tag against_long", label: "▼ Against long" };
+  const lean = longLean(gateCase, c);
+  if (lean === "supports_long") return { className: "lean-tag supports_long", label: "▲ Supports long" };
+  if (lean === "against_long") return { className: "lean-tag against_long", label: "▼ Against long" };
   return null;
 }
 
@@ -69,7 +80,7 @@ function Score({ gate, isSetup }: { gate: GateResultJSON; isSetup: boolean }) {
       <div className="score-row">
         <span className="pips" aria-hidden="true">
           {gate.conditions.map((c) => (
-            <span className={`pip ${c.status}`} key={c.name} />
+            <span className={`pip ${c.status} ${longLean(gate.case, c) ?? ""}`} key={c.name} />
           ))}
         </span>
         <span className="score-text">{parts.join(" · ")}</span>

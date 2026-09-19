@@ -261,6 +261,7 @@ body {
   margin: -4px 0 10px;
 }
 .section-intro b { color: var(--text-dim); }
+.section-intro > div + div { margin-top: 6px; }
 
 .legend {
   display: flex;
@@ -269,6 +270,9 @@ body {
   margin: 6px 0;
 }
 .legend .condition-marker { margin-right: 4px; }
+.lean-word { font-weight: 700; }
+.lean-word.supports_long { color: var(--accent); }
+.lean-word.against_long { color: var(--red); }
 
 .card {
   background: var(--bg-card);
@@ -312,6 +316,10 @@ body {
 .setup-card .condition-marker.fail, .setup-legend .condition-marker.fail { color: var(--text-dim); }
 .setup-card .pip.pass { background: var(--text); }
 .setup-card .pip.fail { background: var(--text-faint); }
+/* A met check's bar takes its long lean, matching the row's tag: green supports a long,
+   red counts against one. Met checks in direction-unclear setups stay white. */
+.setup-card .pip.supports_long { background: var(--accent); }
+.setup-card .pip.against_long { background: var(--red); }
 
 /* Checks-met tally on each card: one pip per check, coloured by its status. */
 .score {

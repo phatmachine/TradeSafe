@@ -181,6 +181,11 @@ export function ReportView({ report }: { report: AnalysisReport }) {
               <span><span className="condition-marker fail">✕</span> checked, not met</span>
               <span><span className="condition-marker unknown">?</span> not enough data to check</span>
             </div>
+            <div>
+              In each card's bar, a met check is <span className="lean-word supports_long">green</span> if it supports a
+              long and <span className="lean-word against_long">red</span> if it counts against one. Unmet checks are
+              grey: a missing piece of one setup isn't evidence for the other side.
+            </div>
             {sc?.regime && (
               <div>
                 Which setups run depends on the market regime, currently <b>{sc.regime.replace(/_/g, " ")}</b>.
