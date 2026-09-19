@@ -24,9 +24,9 @@ from backend.compute.funding import period_means
 from backend.core.config import Config
 from backend.core.observation import Metric, Observation
 from backend.gates.common import ConditionResult, GateResult
+from backend.sources.calendar import EVENT_LABELS
 
 SETUP_NAME = "event_decompression"
-EVENT_LABELS = {"us_cpi": "US CPI", "us_jobs": "US jobs report", "us_pce": "US PCE inflation", "fomc": "FOMC decision"}
 
 
 def evaluate(

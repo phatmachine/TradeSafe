@@ -108,10 +108,31 @@ standalone Caddy variant is `deploy/docker-compose.standalone.yml`).
   updates daily, so it can't give meeting dates; notation votes are skipped). Both give
   dates only: times are the agencies' fixed releases, 8:30 a.m. and 2:00 p.m. New York,
   converted with daylight saving (needs the `tzdata` package — Windows and the slim
-  Docker image have no zone data). Only events that have happened are stored. The US
-  CPI schedule site (bls.gov) blocks automated access; FRED is the way in.
+  Docker image have no zone data). Only events that have happened become evidence; the
+  upcoming schedule goes to its own table (`scheduled_events`, replaced per kind on
+  every poll that reads its source) and feeds only the page's "Scheduled US releases"
+  callout (`GET /api/calendar`). The US CPI schedule site (bls.gov) blocks automated
+  access; FRED is the way in. Coin-specific events (upgrades, votes, unlocks) have no
+  source yet.
 - `python -m backend.research events` loads the same calendar into the research store
   (since 2023: 47 CPI, 47 jobs, 46 PCE, 31 FOMC).
+
+## Data verified against the exchanges (2026-09-19)
+
+Local store vs each exchange's own history for the same minutes (script approach: fetch
+the exchange's 1-minute candles / funding history / OI history and compare row by row):
+
+- Prices (Binance mark, Binance spot, Bybit last; BTC and ZEC, 16 h, ~900 readings
+  each): 99.9% inside that minute's high-low; worst miss 1.5 bp.
+- Funding: the last stored rate before each settlement matched the settled rate
+  (Binance exact; Bybit within 0.0002 pp). OI: Binance within 0.02% (BTC), 0.25% (ZEC).
+- Coinalyze minutes don't get revised after we store them (1 minute-side of ~700 changed).
+- **Coinalyze undercounts**: its copy of OKX had only 28% (BTC) and 47% (ZEC) of the USD
+  that OKX's own REST feed printed over the same 23.5 h (correlation 0.75–0.81). OKX's
+  numbers checked out (ctVal 0.01 for both, no duplicate rows). Coinalyze's Binance and
+  Bybit figures are built the same way (exchange websocket samples), so treat them as
+  samples: fine for "is this hour unusual for this exchange", not for comparing sizes
+  across exchanges.
 
 ## What the history has shown (research harness)
 
@@ -169,9 +190,27 @@ and setup code over ~3.7 years of free history (~3 min). Findings, 2026-09-19:
 - `gate_u.reference_intended_size_coins: 1.0` is a placeholder for the real trade size;
   until set, the order-book depth check passes trivially.
 - TAO and XRP always `GATE_FAIL` (every report since they were first looked up): no
-  chain source or market-cap mapping is configured for them, so `t1_connectivity`
-  fails and OI-to-market-cap / free float are unknown. A config/adapter gap
-  (`backend/config/instruments.yaml`, non-EVM chains), not a threshold problem.
+  `coingecko_id` in `backend/config/instruments.yaml` (CoinGecko 404s on `tao`; its ids
+  are `bittensor` and `ripple`), so no supply or market cap. A config gap, not a
+  threshold problem — but see the next item before "fixing" it.
+- **Gate U counts CoinGecko as the chain.** `free_float_computable` and `t1_connectivity`
+  accept any `supply_total` row, and CoinGecko (T2) writes one, so BTC/ETH/SOL/ZEC pass
+  with "on-chain total supply queried directly" when no chain is queried. Checked
+  strictly they'd all `GATE_FAIL` (one T2 supply source, doctrine wants T1 or two
+  independent T2). Fix = check the tier, plus a second independent supply source
+  (e.g. CoinPaprika, free) or real chain reads; needs a decision since it changes verdicts.
+- **Order-book depth covers a sliver of its ±1% band**: 100 levels (Binance, OKX) and
+  50 (Bybit) reach only ±0.016–0.17% of mid, so depth reads ~6–28x low (BTC Binance
+  22 vs 610 BTC). Errs safe today (size placeholder); fix before setting a real size.
+- **Funding isn't normalised to the settlement interval**: every rate is labelled per
+  8 h. True for BTC/ETH/SOL/ZEC/XRP; TAO settles every 4 h on Binance and Bybit, and
+  Binance shortens intervals for any coin in extreme moves. Read the interval per venue.
+- Liquidations mix OKX's full feed with sampled Binance/Bybit (see above), so the
+  trapped-cohort read leans on OKX. After a fresh start the 7-day baseline's early days
+  are Coinalyze's OKX copy (smaller), so "settled" is harder to pass for about a week.
+- No container health check: `restart: unless-stopped` covers a crash, not a hung
+  collector (reports then fail closed, silently). The SQLite volume has no backup, and
+  1-minute liquidation history can't be re-fetched.
 - The research harness has no liquidation history, so cascade/squeeze haven't been
   back-tested with the new "settled" rule; Coinalyze hourly data covers ~3 months.
 - Swing-timeframe direction signals (daily-chart trend, multi-day funding, OI trend,

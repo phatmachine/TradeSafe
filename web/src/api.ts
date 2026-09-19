@@ -102,6 +102,22 @@ export interface AlertsResponse {
   scanner: { interval_minutes: number; last_run: ScanRun | null; watched: number };
 }
 
+export interface CalendarEvent {
+  kind: string;
+  label: string;
+  at: string;
+  source_id: string;
+  fetched_at?: string; // upcoming only: when its source last confirmed the date
+}
+
+export interface CalendarResponse {
+  as_of: string;
+  window_days: number;
+  upcoming: CalendarEvent[];
+  recent: CalendarEvent[];
+  recent_hours: number;
+}
+
 const BASE = "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -135,4 +151,5 @@ export const api = {
   reportHistory: (symbol: string) => request<{ records: Record<string, unknown>[] }>(`/api/report/${symbol}/history`),
   alerts: (after = 0) => request<AlertsResponse>(`/api/alerts?after=${after}`),
   testAlert: () => request<SetupAlert>("/api/alerts/test", { method: "POST" }),
+  calendar: () => request<CalendarResponse>("/api/calendar"),
 };

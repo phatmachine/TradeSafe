@@ -13,8 +13,10 @@ its venue).
 
 Both sources give dates only. The times are the agencies' fixed release times in New York
 (RELEASE_TIMES), converted to UTC with daylight saving applied. Only events whose time
-has passed are returned: an event is a fact once it has happened, and a rescheduled
-future date can never be left behind in the store.
+has passed become Observations: an event is a fact once it has happened. Both sources
+also publish upcoming dates; `fetch_schedule` returns those too, and the collector keeps
+them apart from the evidence (store table `scheduled_events`, replaced on every poll, so
+a rescheduled release never leaves its old date behind). No report reads them.
 """
 from __future__ import annotations
 
@@ -42,6 +44,7 @@ FRED_RELEASES = {"us_cpi": 10, "us_jobs": 50, "us_pce": 54}
 RELEASE_TIMES = {"us_cpi": time(8, 30), "us_jobs": time(8, 30), "us_pce": time(8, 30), "fomc": time(14, 0)}
 SOURCE_IDS = {"us_cpi": "fred", "us_jobs": "fred", "us_pce": "fred", "fomc": "fed_fomc_calendar"}
 EVENT_KINDS = tuple(RELEASE_TIMES)
+EVENT_LABELS = {"us_cpi": "US CPI", "us_jobs": "US jobs report", "us_pce": "US PCE inflation", "fomc": "FOMC decision"}
 
 _MONTHS = {m: i for i, m in enumerate(
     ("january", "february", "march", "april", "may", "june", "july", "august",
@@ -129,20 +132,29 @@ def to_observation(kind: str, at: datetime, cfg: Config) -> Observation:
     )
 
 
-def fetch_events(client: httpx.Client, *, since: date, now: datetime) -> tuple[list[tuple[str, datetime]], list[str]]:
-    """(kind, time) of every event from `since` whose time has passed, oldest first, plus
-    one error per source that failed — one source failing doesn't hide the others.
-    Without FRED_API_KEY only FOMC decisions are returned; that's reported by the caller
-    once, not as an error on every call."""
-    found: list[tuple[str, datetime]] = []
+def fetch_schedule(client: httpx.Client, *, since: date) -> tuple[dict[str, list[datetime]], list[str]]:
+    """Every event time from `since` on, past and scheduled, oldest first, for each kind
+    whose source could be read, plus one error per source that failed — one source
+    failing doesn't hide the others. A kind missing from the result wasn't read, which
+    is not the same as having nothing scheduled. Without FRED_API_KEY only FOMC decisions
+    are read; that's reported by the caller once, not as an error on every call."""
+    schedule: dict[str, list[datetime]] = {}
     errors: list[str] = []
     for kind, release_id in FRED_RELEASES.items() if fred_key() else ():
         try:
-            found += [(kind, event_time(kind, d)) for d in fetch_fred_release(client, release_id, since=since)]
+            schedule[kind] = sorted({event_time(kind, d) for d in fetch_fred_release(client, release_id, since=since)})
         except SourceError as exc:
             errors.append(str(exc))
     try:
-        found += [("fomc", event_time("fomc", d)) for d in fetch_fomc(client) if d >= since]
+        schedule["fomc"] = [event_time("fomc", d) for d in fetch_fomc(client) if d >= since]
     except SourceError as exc:
         errors.append(str(exc))
-    return sorted(((k, at) for k, at in set(found) if at <= now), key=lambda e: (e[1], e[0])), errors
+    return schedule, errors
+
+
+def fetch_events(client: httpx.Client, *, since: date, now: datetime) -> tuple[list[tuple[str, datetime]], list[str]]:
+    """(kind, time) of every event from `since` whose time has passed, oldest first, plus
+    one error per source that failed."""
+    schedule, errors = fetch_schedule(client, since=since)
+    found = [(kind, at) for kind, times in schedule.items() for at in times if at <= now]
+    return sorted(found, key=lambda e: (e[1], e[0])), errors

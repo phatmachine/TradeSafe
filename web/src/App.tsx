@@ -3,6 +3,7 @@ import { api, AnalysisReport, ApiError } from "./api";
 import { AlertCenter } from "./components/AlertCenter";
 import { Login } from "./components/Login";
 import { ReportView } from "./components/ReportView";
+import { UpcomingEvents } from "./components/UpcomingEvents";
 
 type AuthState = "checking" | "in" | "out";
 
@@ -129,6 +130,8 @@ export default function App() {
           ))}
         </div>
       )}
+
+      <UpcomingEvents />
 
       <AlertCenter onOpen={openFromAlert} />
 

@@ -123,6 +123,17 @@ CREATE TABLE IF NOT EXISTS scan_runs (
     new_alerts INTEGER NOT NULL,
     errors TEXT NOT NULL DEFAULT ''
 );
+
+-- Upcoming scheduled macro releases (sources/calendar.py), for display only: not evidence,
+-- and nothing a report computes reads it. The collector replaces a kind's rows whole on
+-- every poll that reads its source, so a rescheduled release never keeps its old date.
+CREATE TABLE IF NOT EXISTS scheduled_events (
+    kind TEXT NOT NULL,
+    at TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (kind, at)
+);
 """
 
 
@@ -590,3 +601,33 @@ def record_scan_run(conn: sqlite3.Connection, *, instruments: int, new_alerts: i
 def last_scan_run(conn: sqlite3.Connection) -> dict | None:
     row = conn.execute("SELECT * FROM scan_runs ORDER BY id DESC LIMIT 1").fetchone()
     return dict(row) if row else None
+
+
+def replace_scheduled_events(
+    conn: sqlite3.Connection, *, kind: str, source_id: str, times: list[datetime], now: datetime
+) -> None:
+    """A kind's upcoming schedule, as just read from its source, in place of the last one."""
+    conn.execute("DELETE FROM scheduled_events WHERE kind = ?", (kind,))
+    conn.executemany(
+        "INSERT OR IGNORE INTO scheduled_events (kind, at, source_id, fetched_at) VALUES (?, ?, ?, ?)",
+        [(kind, _iso(at), source_id, _iso(now)) for at in times if at > now],
+    )
+
+
+def upcoming_events(conn: sqlite3.Connection, *, now: datetime, until: datetime | None = None, limit: int = 50) -> list[dict]:
+    """Scheduled events after `now` (and no later than `until`), soonest first."""
+    rows = conn.execute(
+        "SELECT kind, at, source_id, fetched_at FROM scheduled_events WHERE at > ? AND at <= ? ORDER BY at, kind LIMIT ?",
+        (_iso(now), _iso(until) if until else "9999-12-31", limit),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def recent_macro_events(conn: sqlite3.Connection, *, since: datetime) -> list[dict]:
+    """Macro events that have happened since `since`, as stored evidence, oldest first."""
+    rows = conn.execute(
+        """SELECT venue AS kind, observed_at AS at, source_id FROM observations
+           WHERE instrument = 'MACRO' AND metric = 'event' AND observed_at >= ? ORDER BY observed_at""",
+        (_iso(since),),
+    ).fetchall()
+    return [dict(r) for r in rows]

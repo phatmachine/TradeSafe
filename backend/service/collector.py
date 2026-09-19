@@ -341,12 +341,17 @@ async def coinalyze_liquidation_poll_loop(stop_event: asyncio.Event) -> None:
 
 def collect_calendar_events(cfg: Config, *, client: httpx.Client, now: datetime | None = None) -> tuple[int, list[str]]:
     """Stores every scheduled macro event of the last CALENDAR_LOOKBACK that has happened
-    and isn't stored yet, once per kind and time. Returns (rows written, source errors)."""
+    and isn't stored yet, once per kind and time, and replaces the upcoming schedule of
+    each kind whose source was read (display only, kept out of the evidence). Returns
+    (rows written, source errors)."""
     now = now or datetime.now(timezone.utc)
     since = now - CALENDAR_LOOKBACK
-    found, errors = calendar.fetch_events(client, since=since.date(), now=now)
+    schedule, errors = calendar.fetch_schedule(client, since=since.date())
+    found = [(kind, at) for kind, times in schedule.items() for at in times if at <= now]
     written = 0
     with db.get_connection() as conn:
+        for kind, times in schedule.items():
+            db.replace_scheduled_events(conn, kind=kind, source_id=calendar.SOURCE_IDS[kind], times=times, now=now)
         for kind in {k for k, _ in found}:
             seen = {
                 at for at, _ in db.observation_keys_since(

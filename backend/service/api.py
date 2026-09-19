@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Response
@@ -24,6 +24,7 @@ from backend.report.render import render_text
 from backend.scripts import backfill_history
 from backend.service import auth, scanner
 from backend.service.collector import collect_once
+from backend.sources.calendar import EVENT_LABELS
 from backend.store import db
 
 app = FastAPI(title="TradeSafe evidence API", version="1.0")
@@ -195,6 +196,25 @@ def create_test_alert():
                 "is_test": True,
             },
         )
+
+
+@app.get("/api/calendar", dependencies=[Depends(require_auth)])
+def get_calendar(days: int = 14):
+    """Scheduled US macro releases for the page's callout: those in the next `days` (or,
+    if none, the next one), and any within the window the event setup reads after a
+    release (event.resolved_within_hours). Display only — no report reads this, and
+    upcoming dates are never evidence."""
+    now = datetime.now(timezone.utc)
+    recent_hours = float(load_config().get("event", "resolved_within_hours", default=24))
+    with db.get_connection() as conn:
+        upcoming = db.upcoming_events(conn, now=now, until=now + timedelta(days=max(1, min(days, 90))))
+        if not upcoming:
+            upcoming = db.upcoming_events(conn, now=now, limit=1)
+        recent = db.recent_macro_events(conn, since=now - timedelta(hours=recent_hours))
+    for e in upcoming + recent:
+        e["label"] = EVENT_LABELS.get(e["kind"], e["kind"])
+    return {"as_of": now.isoformat(), "window_days": days, "upcoming": upcoming, "recent": recent,
+            "recent_hours": recent_hours}
 
 
 @app.get("/api/report/{symbol}/history", dependencies=[Depends(require_auth)])

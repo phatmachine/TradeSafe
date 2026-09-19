@@ -92,6 +92,36 @@ def test_each_event_is_stored_once(monkeypatch):
     assert sorted(v for _, v in rows) == ["fomc", "fomc", "us_cpi", "us_jobs"] and {i for i, _ in rows} == {MACRO}
 
 
+class _RescheduledCpi(_FakeSources):
+    def get(self, url, params=None, headers=None, timeout=None):
+        if params and params.get("release_id") == 10:
+            return _Resp(json={"release_dates": [{"date": "2025-09-11"}, {"date": "2025-10-24"}]})
+        return super().get(url, params=params, headers=headers, timeout=timeout)
+
+
+def test_upcoming_releases_are_kept_apart_from_evidence_and_follow_a_reschedule(monkeypatch):
+    monkeypatch.setenv(calendar.FRED_KEY_ENV, "test-key")
+    cfg = load_config()
+    collector.collect_calendar_events(cfg, client=_FakeSources(), now=NOW)
+    with db.get_connection() as conn:
+        upcoming = db.upcoming_events(conn, now=NOW)
+        stored = conn.execute("SELECT COUNT(*) FROM observations WHERE observed_at > ?", (NOW.isoformat(),)).fetchone()[0]
+    assert [(e["kind"], e["at"]) for e in upcoming] == [
+        ("us_pce", "2025-09-26T12:30:00+00:00"), ("us_cpi", "2025-10-15T12:30:00+00:00"),
+    ]
+    assert stored == 0  # a date that hasn't happened is never evidence
+
+    collector.collect_calendar_events(cfg, client=_RescheduledCpi(), now=NOW)
+    with db.get_connection() as conn:
+        cpi = [e["at"] for e in db.upcoming_events(conn, now=NOW) if e["kind"] == "us_cpi"]
+    assert cpi == ["2025-10-24T12:30:00+00:00"]
+
+    monkeypatch.delenv(calendar.FRED_KEY_ENV)  # CPI unreadable: its last schedule stands
+    collector.collect_calendar_events(cfg, client=_FakeSources(), now=NOW)
+    with db.get_connection() as conn:
+        assert [e["kind"] for e in db.upcoming_events(conn, now=NOW)] == ["us_pce", "us_cpi"]
+
+
 # --- the setup ---------------------------------------------------------------------------
 
 AS_OF = datetime(2025, 9, 11, 15, 30, tzinfo=timezone.utc)
