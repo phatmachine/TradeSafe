@@ -176,7 +176,7 @@ export function ReportView({ report }: { report: AnalysisReport }) {
           <div className="section-intro">
             Each setup is a market pattern this app looks for. It counts as present only when <b>every</b> check is met.
             The tag shows which way the pattern points <i>if</i> it's present. It isn't a result.
-            <div className="legend">
+            <div className="legend setup-legend">
               <span><span className="condition-marker pass">✓</span> met</span>
               <span><span className="condition-marker fail">✕</span> checked, not met</span>
               <span><span className="condition-marker unknown">?</span> not enough data to check</span>

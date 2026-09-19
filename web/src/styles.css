@@ -303,8 +303,15 @@ body {
 .pill.pass { background: rgba(200,241,105,0.18); color: var(--accent); }
 .pill.fail { background: rgba(255,107,94,0.18); color: var(--red); }
 .pill.unknown { background: rgba(154,156,146,0.18); color: var(--text-dim); }
-/* A setup that isn't present is the normal state, not an error — kept neutral, unlike a failed gate. */
+/* Inside setup cards, green and red mean long and short only (the case and lean tags), so
+   met / not met / present are shown in neutral tones. Trust-check cards keep green and red:
+   a failed check there is a real problem. */
 .pill.absent { background: rgba(154,156,146,0.18); color: var(--text-dim); white-space: nowrap; }
+.pill.present { background: var(--text); color: var(--bg); white-space: nowrap; }
+.setup-card .condition-marker.pass, .setup-legend .condition-marker.pass { color: var(--text); }
+.setup-card .condition-marker.fail, .setup-legend .condition-marker.fail { color: var(--text-dim); }
+.setup-card .pip.pass { background: var(--text); }
+.setup-card .pip.fail { background: var(--text-faint); }
 
 /* Checks-met tally on each card: one pip per check, coloured by its status. */
 .score {

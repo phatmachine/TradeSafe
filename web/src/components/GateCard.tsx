@@ -82,12 +82,12 @@ function Score({ gate, isSetup }: { gate: GateResultJSON; isSetup: boolean }) {
 export function GateCard({ gate, title }: { gate: GateResultJSON; title?: string }) {
   const isSetup = gate.case !== "not_directional";
   const about = ABOUT[gate.gate] ?? (gate.case ? CASE_NOTE[gate.case] : undefined);
-  const pill = gate.passed
-    ? { className: "pass", label: isSetup ? "Present" : "Pass" }
-    : { className: isSetup ? "absent" : "fail", label: isSetup ? "Not present" : "Fail" };
+  const pill = isSetup
+    ? { className: gate.passed ? "present" : "absent", label: gate.passed ? "Present" : "Not present" }
+    : { className: gate.passed ? "pass" : "fail", label: gate.passed ? "Pass" : "Fail" };
 
   return (
-    <div className="card">
+    <div className={isSetup ? "card setup-card" : "card"}>
       <div className="gate-header">
         <span className="gate-name">
           {title || gate.gate.replace(/_/g, " ")}
