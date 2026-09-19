@@ -131,6 +131,21 @@ exhaustion:
   # uses carry_ratio_material, plus:
   structural_break_lookback_bars: 20
 
+# Event decompression (setups/event.py) over scheduled US macro events: CPI, jobs, PCE
+# (FRED release calendar) and FOMC decisions (the Fed's calendar), sources/calendar.py.
+event:
+  # The most recent event must be this recent. Swept 2026-09-19 in the research harness
+  # (BTC/ETH/SOL/ZEC, 2023-2026, 171 events, 4h grid, 5-day hold, scored as fading the
+  # crowd going into the event): 6h 25 signals 60.0% vs 49.3% random; 12h 26, 61.5%;
+  # 24h 28, 60.7%; 48h 34, 58.8% (median +4.1% at 6-24h, +2.9% at 48h). 6-24h is a
+  # plateau; 48h adds later, weaker entries. 24h = the widest value on the plateau, so an
+  # event isn't missed because the regime was briefly undetermined after the release.
+  resolved_within_hours: 24
+  # Funding going into the event must share a sign and exceed this in each of the
+  # funding_periods periods before it (percent per 8h). Same value as before 2026-09-19,
+  # when it was derived as gate_u.rv_band_min / 10; now a key of its own.
+  one_sided_funding_min_pct: 0.02
+
 # Fractions of the last swing leg (swing low -> high since it in an uptrend, mirrored in
 # a downtrend), NOT of price — see setups/continuation.py. The band itself is the
 # doctrine's own 15-25% and is unchanged; what changed 2026-09-18 is what it is measured

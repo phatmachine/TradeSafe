@@ -85,6 +85,25 @@ sources:
       the only liquidation feed. Second-hand totals of throttled exchange samples: cohort
       and print-settled input only, never a decision metric. Needs COINALYZE_API_KEY.
 
+  - source_id: fred
+    name: "FRED release calendar (St. Louis Fed): US CPI, jobs report, PCE"
+    upstream_id: fred
+    collection_method: agency_api
+    tier: T1
+    metrics: [event]
+    note: >
+      Republishes the BLS and BEA release schedules; past dates are the actual ones.
+      Dates only: times are the agencies' fixed 8:30 a.m. New York releases
+      (sources/calendar.py). Needs FRED_API_KEY.
+
+  - source_id: fed_fomc_calendar
+    name: "Federal Reserve FOMC meeting calendar"
+    upstream_id: federal_reserve
+    collection_method: scrape
+    tier: T1
+    metrics: [event]
+    note: "Decision = last day of each regular meeting, statement at 2:00 p.m. New York."
+
   # Optional / disabled by default per implementation-spec "Spend nothing until
   # calibration" — flip enabled: true only once a specific gap appears in the sweep.
   - source_id: coinglass

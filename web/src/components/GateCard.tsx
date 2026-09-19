@@ -27,7 +27,7 @@ const ABOUT: Record<string, string> = {
   positioning_exhaustion:
     "Looks for traders piling into a losing position: holding it costs a lot relative to the expected move, open interest is rising while price falls, and market structure has broken. It shows positioning is stretched, not which way it resolves.",
   event_decompression:
-    "Looks for one-sided positioning around a dated event, read after the event has happened. No event calendar is connected yet, so the event check shows ? until one is.",
+    "Looks for traders crowded on one side going into a scheduled US release (CPI, jobs report, PCE inflation or a Fed rate decision), read in the 24 hours after it. It shows positioning was stretched into the news, not which way it resolves.",
 };
 
 const CASE_NOTE: Partial<Record<GateCase, string>> = {

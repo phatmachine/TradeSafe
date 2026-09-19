@@ -19,6 +19,10 @@ What it is, and what it deliberately is not:
 - No liquidation history exists for free, so cascade/squeeze absorption are scored on
   every condition except liquidation_print_settled, and no trapped cohort is named. The
   reports say so wherever those setups appear.
+- Event decompression runs over the macro calendar (`python -m backend.research events`).
+  The setup doesn't claim a direction, so it is scored as a hypothesis the live path
+  never states: price moves against whoever was crowded going into the event, judged
+  against a random entry taking the same sides.
 
 Signals are counted as episodes: a run of consecutive grid instants where a setup
 qualifies is one signal, entered at its first instant, so a setup that stays true for six
@@ -35,9 +39,10 @@ from decimal import Decimal
 
 from backend.compute import regime as regime_mod
 from backend.core.config import Config, load_config, with_override
-from backend.core.observation import Metric
+from backend.core.observation import MACRO, Metric
 from backend.research import store
-from backend.setups import cascade, continuation, exhaustion
+from backend.setups import cascade, continuation, event, exhaustion
+from backend.sources.calendar import EVENT_KINDS
 
 BAR_SECONDS = 900
 # Thresholds the regime classifier reads. Sweeping anything else reuses one regime pass.
@@ -52,7 +57,9 @@ SETUP_SIDE = {
     cascade.SHORT_SETUP_NAME: -1,
     continuation.SHORT_SETUP_NAME: -1,
     exhaustion.SETUP_NAME: None,  # doesn't encode a direction: reported as "% price rose"
+    event.SETUP_NAME: None,  # side set per signal: against the crowd going into the event
 }
+CROWD_FADE = {event.SETUP_NAME}
 REGIME_FWD_DAYS = 7
 
 
@@ -79,6 +86,8 @@ class History:
     volume_ts: list[int]
     perp_cum: list[Decimal]
     spot_cum: list[Decimal]
+    events: list[Point] = field(default_factory=list)
+    events_ts: list[int] = field(default_factory=list)
 
 
 def _cumulative(rows: list[tuple[int, Decimal]]) -> tuple[list[int], list[Decimal]]:
@@ -97,6 +106,7 @@ def load_history(instrument: str) -> History:
         funding = {v: store.load(conn, instrument, store.FUNDING, v) for v in ("binance", "bybit")}
         perp = store.load(conn, instrument, store.PERP_VOLUME, "binance")
         spot = dict(store.load(conn, instrument, store.SPOT_VOLUME, "binance"))
+        events = sorted((t, kind) for kind in EVENT_KINDS for t, _ in store.load(conn, MACRO, store.EVENT, kind))
     if not price:
         raise SystemExit(f"no research history for {instrument} — run: python -m backend.research backfill {instrument}")
     # Perp and spot bars are paired by close time so both running sums share one index.
@@ -113,6 +123,8 @@ def load_history(instrument: str) -> History:
         volume_ts=volume_ts,
         perp_cum=perp_cum,
         spot_cum=spot_cum,
+        events=[Point(Metric.EVENT, kind, t, Decimal(1)) for t, kind in events],
+        events_ts=[t for t, _ in events],
     )
 
 
@@ -161,6 +173,7 @@ class Instant:
     t: int
     regime: str
     setups: dict[str, tuple[bool, dict[str, str]]] = field(default_factory=dict)  # name -> (qualified, statuses)
+    sides: dict[str, int] = field(default_factory=dict)  # CROWD_FADE setups: the side each would take
 
 
 def evaluate(h: History, cfg: Config, t: int, regime: regime_mod.Regime | None = None) -> Instant:
@@ -198,6 +211,18 @@ def evaluate(h: History, cfg: Config, t: int, regime: regime_mod.Regime | None =
             perp_volume_current=_rolling_sum(h.volume_ts, h.perp_cum, t, 86400),
             spot_volume_current=_rolling_sum(h.volume_ts, h.spot_cum, t, 86400),
             cfg=cfg, side=side))
+
+    # Event decompression runs in every determined regime, as it does live. Funding points
+    # reach back past the resolved window so the periods going into the event are there.
+    resolved_s = float(cfg.get("event", "resolved_within_hours", default=24)) * 3600
+    periods = int(resolved_s // BAR_SECONDS) + int(cfg.get("funding_periods", default=3)) + 1
+    result = event.evaluate(
+        h.instrument, event_history=_window(h.events, h.events_ts, t - lookback, t),
+        funding_history=_funding_points(h, t, periods=periods), as_of=as_of, cfg=cfg)
+    record(event.SETUP_NAME, result)
+    positioning = next(c for c in result.conditions if c.name == "one_sided_positioning_verifiable")
+    if positioning.status == "pass":
+        out.sides[event.SETUP_NAME] = -1 if positioning.computed_value[0] > 0 else 1
     return out
 
 
@@ -222,6 +247,7 @@ class SetupScore:
     qualified_instants: int = 0
     episodes: int = 0
     scored: list[Decimal] = field(default_factory=list)  # forward return in the setup's direction
+    sides: list[int] = field(default_factory=list)  # CROWD_FADE setups: the side of each scored signal
     condition_pass: dict[str, int] = field(default_factory=dict)
     condition_unknown: dict[str, int] = field(default_factory=dict)
 
@@ -275,8 +301,10 @@ def score(h: History, cfg: Config, instants: list[Instant]) -> CoinResult:
             s.episodes += 1
             ret = fwd(inst.t, float(hold.get(name, 10)))
             if ret is not None:
-                side = SETUP_SIDE.get(name)
+                side = inst.sides.get(name) if name in CROWD_FADE else SETUP_SIDE.get(name)
                 s.scored.append(ret * side if side else ret)
+                if name in CROWD_FADE:
+                    s.sides.append(side)
         previously_qualified = now_qualified
     months = (instants[-1].t - instants[0].t) / (86400 * 30.44) if len(instants) > 1 else 0.0
     base_fwd: dict[float, list[Decimal]] = {}
@@ -321,11 +349,26 @@ def _pct(n: int, d: int) -> str:
     return f"{100 * n / d:5.1f}%" if d else "    -"
 
 
-def _base_rate(res: CoinResult, name: str, hold_days: float) -> tuple[int, int]:
-    """(wins, total) for a random entry held as long as this setup, on its side."""
-    side = SETUP_SIDE.get(name) or 1
+def _base_rate(res: CoinResult, name: str, hold_days: float) -> tuple[float, int]:
+    """(wins, total) for a random entry held as long as this setup, on its side. A
+    CROWD_FADE setup takes both sides, so its random entry takes them in the same mix."""
     base = res.base_fwd.get(hold_days, [])
+    if name in CROWD_FADE:
+        s = res.setups.get(name)
+        sides = s.sides if s else []
+        if not sides or not base:
+            return 0, 0
+        up = sum(1 for r in base if r > 0) / len(base)
+        down = sum(1 for r in base if r < 0) / len(base)
+        return sum(up if x > 0 else down for x in sides), len(sides)
+    side = SETUP_SIDE.get(name) or 1
     return sum(1 for r in base if r * side > 0), len(base)
+
+
+def _label(name: str) -> str:
+    if name in CROWD_FADE:
+        return "went against the pre-event crowd"
+    return "price rose" if SETUP_SIDE.get(name) is None else "went its way"
 
 
 def _setup_line(name: str, scores: list[tuple[str, CoinResult]], hold_days: float) -> list[str]:
@@ -341,10 +384,8 @@ def _setup_line(name: str, scores: list[tuple[str, CoinResult]], hold_days: floa
         base_wins, base_total = base_wins + bw, base_total + bt
         lines.append("    " + _setup_stats(coin, s, res.months, name, bw, bt))
     if pooled:
-        side = SETUP_SIDE.get(name)
         wins = sum(1 for r in pooled if r > 0)
-        label = "price rose" if side is None else "went its way"
-        lines.append(f"    {'all':<5} {len(pooled)} scored signals: {label} {_pct(wins, len(pooled))} "
+        lines.append(f"    {'all':<5} {len(pooled)} scored signals: {_label(name)} {_pct(wins, len(pooled))} "
                      f"vs {_pct(base_wins, base_total).strip()} for a random entry, "
                      f"median {statistics.median(pooled) * 100:+.1f}%, mean {statistics.mean(pooled) * 100:+.1f}%")
     return lines
@@ -352,11 +393,9 @@ def _setup_line(name: str, scores: list[tuple[str, CoinResult]], hold_days: floa
 
 def _setup_stats(coin: str, s: SetupScore, months: float, name: str, base_wins: int, base_total: int) -> str:
     per_month = s.episodes / months if months else 0
-    side = SETUP_SIDE.get(name)
     if s.scored:
         wins = sum(1 for r in s.scored if r > 0)
-        label = "price rose" if side is None else "went its way"
-        tail = (f"{label} {_pct(wins, len(s.scored))} vs {_pct(base_wins, base_total).strip()} random, "
+        tail = (f"{_label(name)} {_pct(wins, len(s.scored))} vs {_pct(base_wins, base_total).strip()} random, "
                 f"median {statistics.median(s.scored) * 100:+.1f}% ({len(s.scored)} scored)")
     else:
         tail = "no scored signals"
@@ -381,6 +420,8 @@ def baseline_report(symbols: list[str], *, step_hours: float = 1.0) -> str:
     for name in names:
         note = "  [scored without the liquidation check — no free history]" if name in (
             cascade.SETUP_NAME, cascade.SHORT_SETUP_NAME) else ""
+        if name in CROWD_FADE:
+            note = "  [scored as fading the pre-event crowd — a hypothesis the live report doesn't state]"
         hold = cfg.get("expected_hold_window_days", default={}).get(name, 10)
         out.append(f"{name} (held {hold}d){note}")
         out.extend(_setup_line(name, list(results.items()), float(hold)))

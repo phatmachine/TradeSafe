@@ -14,6 +14,11 @@ from typing import Any
 from backend.core.config import Config
 
 
+# The instrument label for market-wide observations: the scheduled macro event calendar
+# (sources/calendar.py) applies to every coin, so it's stored once under this.
+MACRO = "MACRO"
+
+
 class Metric(str, Enum):
     PRICE = "price"
     ORDER_BOOK_DEPTH = "order_book_depth"

@@ -22,7 +22,7 @@ from backend.compute.ratios import carry_ratio, oi_to_market_cap, perp_to_spot_v
 from backend.compute.volatility import atr as atr_fn
 from backend.compute.volatility import daily_closes
 from backend.core.config import Config
-from backend.core.observation import Metric, Observation
+from backend.core.observation import MACRO, Metric, Observation
 from backend.core.registry import SourceRegistry
 from backend.gates import gate_u, layer_0
 from backend.gates.common import GateResult
@@ -287,7 +287,11 @@ def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceR
     price_hist_single_venue = _single_best_venue_series(price_hist_all, Metric.PRICE)
     oi_hist = [o for o in all_history if o.metric == Metric.OI_COIN]
     funding_hist = [o for o in all_history if o.metric == Metric.FUNDING_8H]
-    event_hist = [o for o in all_history if o.metric == Metric.EVENT]
+    # The instrument's own events plus the market-wide macro calendar (sources/calendar.py),
+    # which applies to every coin and is stored once under MACRO.
+    event_hist = [o for o in all_history if o.metric == Metric.EVENT] + ds.observations_including_expired(
+        MACRO, lookback_seconds=history_lookback, metrics=(Metric.EVENT,)
+    )
     # Liquidations are discrete prints (never compacted) and the busiest coins log
     # thousands a day, so they're read only as far back as anything here looks at them —
     # the cohort window or the print-settled baseline, plus a day so that baseline can

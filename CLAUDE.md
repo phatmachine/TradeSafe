@@ -27,8 +27,9 @@ Three processes, all from the repo root (imports are `backend.…`, so not from 
 # API (needs TRADESAFE_PASSWORD + TRADESAFE_SECRET; INSECURE_COOKIE for plain http)
 TRADESAFE_PASSWORD=devpass TRADESAFE_SECRET=devsecret TRADESAFE_INSECURE_COOKIE=true \
   .venv/Scripts/python.exe -m uvicorn backend.service.api:app --port 8000
-# Collector (the only writer of observations; COINALYZE_API_KEY enables Binance/Bybit liquidations)
-TRADESAFE_PASSWORD=devpass TRADESAFE_SECRET=devsecret COINALYZE_API_KEY=<key> \
+# Collector (the only writer of observations). COINALYZE_API_KEY enables Binance/Bybit
+# liquidations; FRED_API_KEY enables CPI/jobs/PCE dates (FOMC dates need no key).
+TRADESAFE_PASSWORD=devpass TRADESAFE_SECRET=devsecret COINALYZE_API_KEY=<key> FRED_API_KEY=<key> \
   .venv/Scripts/python.exe -m backend.service.collector
 # Web: http://localhost:5173 (Vite proxies /api and /health to :8000), log in with devpass
 cd web && npm run dev
@@ -54,7 +55,8 @@ standalone Caddy variant is `deploy/docker-compose.standalone.yml`).
 
 1. Push to **both** `main` and `master` (Hostinger clones the public GitHub repo).
 2. Read the current environment with `VPS_getProjectContentsV1` — it holds
-   `TRADESAFE_PASSWORD`, `TRADESAFE_SECRET` and `COINALYZE_API_KEY`, which live only there.
+   `TRADESAFE_PASSWORD`, `TRADESAFE_SECRET`, `COINALYZE_API_KEY` and `FRED_API_KEY`, which
+   live only there.
 3. `VPS_createNewProjectV1` with the **same** name `tradesafe`, `content` = the bare repo
    URL, and that **same** environment (leaving a value out changes the login or turns a
    feed off). This rebuilds in place and keeps the `tradesafe_data` volume.
@@ -99,8 +101,17 @@ standalone Caddy variant is `deploy/docker-compose.standalone.yml`).
   ~30 s, since 2023) and OI/long-short metrics (since 2020), but no liquidation history.
 - Judged not worth it: FreeCryptoAPI (resells the same exchanges, 3-hour-old derivatives
   data), CoinGlass (4-hour granularity on the $29 plan; fine data costs $299/mo).
-- Events: the event setup has no calendar yet. The Fed's FOMC schedule is a free primary
-  source; the US CPI schedule site blocks automated access.
+- **Macro event calendar** (`backend/sources/calendar.py`, polled every 15 min, stored
+  once under instrument `MACRO`): CPI, jobs report and PCE release dates from **FRED**
+  (free key; past dates are the actual ones, next ~3 months scheduled), and FOMC
+  decisions scraped from the Fed's calendar page (FRED's "FOMC Press Release" entry
+  updates daily, so it can't give meeting dates; notation votes are skipped). Both give
+  dates only: times are the agencies' fixed releases, 8:30 a.m. and 2:00 p.m. New York,
+  converted with daylight saving (needs the `tzdata` package — Windows and the slim
+  Docker image have no zone data). Only events that have happened are stored. The US
+  CPI schedule site (bls.gov) blocks automated access; FRED is the way in.
+- `python -m backend.research events` loads the same calendar into the research store
+  (since 2023: 47 CPI, 47 jobs, 46 PCE, 31 FOMC).
 
 ## What the history has shown (research harness)
 
@@ -118,6 +129,14 @@ and setup code over ~3.7 years of free history (~3 min). Findings, 2026-09-19:
   liquidation check. No setup has shown an edge worth trading yet.
 - Historically ~2 directional setups a week across 4 coins, ~12/month of positioning
   exhaustion (no direction).
+- On an hourly grid (more, shorter episodes) squeeze absorption's lead narrows: 773
+  signals, 52.5% vs 47.7%, mean −2.4%.
+- **Event decompression** (hourly grid, 171 macro events since 2023, 5-day hold, scored
+  as fading whoever was crowded going into the event): 32 signals (~0.7/month across 4
+  coins), 59.4% vs 49.4% random, median +2.7% but mean +0.0% (large losses offset the
+  typical win); BTC/ETH/ZEC ahead, SOL behind. Suggestive at this sample size, not
+  proven — the live report still calls it "direction unclear". Its bottleneck is
+  one-sided funding going into the event (1.1% of hours).
 
 ## Decisions made (and why)
 
@@ -126,6 +145,11 @@ and setup code over ~3.7 years of free history (~3 min). Findings, 2026-09-19:
   7 days and a print in the last day). The old rule, "no liquidation for 60 minutes",
   held in 2–10% of hours across Binance/Bybit/OKX and got rarer with each exchange
   added, so it measured coverage, not the market. Numbers are inline in thresholds.yaml.
+- **Event decompression** reads the doctrine's "traded after the event resolves" as: the
+  most recent scheduled event happened within `event.resolved_within_hours` (24; 6–24h
+  is a plateau in the sweep, numbers inline in thresholds.yaml), and positioning as the
+  funding of the 3 periods going INTO that event, not now. Before this, any event in
+  the last 30 days counted, so with monthly releases it would have fired on funding alone.
 - Perp/spot ratio ceiling 3.0 → 20.0 (measured 0% pass rate); funding dispersion made
   absolute; OI dispersion loosened (venues legitimately differ by size).
 - Long/short labels: setups carry a Long-type / Short-type / Direction unclear tag;
@@ -151,4 +175,3 @@ and setup code over ~3.7 years of free history (~3 min). Findings, 2026-09-19:
 - Layer 0's partial-snapshot rule is effectively off on Linux (no shared `collected_at`
   per fetch); fixing it changes live behaviour and needs a decision.
 - `regime.find_swings` counts the still-forming 4h bar as a confirming bar.
-- Event calendar (FOMC first) for the event decompression setup.

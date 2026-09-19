@@ -5,6 +5,7 @@ What exists for free, measured 2026-09-18, all back to at least 2023-01-01:
 - Binance spot klines, 15m: spot volume
 - Binance and Bybit settled funding rates
 - Bybit linear open interest, 15m snapshots
+- Scheduled US macro events (backfill_events): CPI, jobs, PCE from FRED, FOMC from the Fed
 
 What does not, so it can't be calibrated from here: liquidation history (OKX keeps 24h,
 everything longer is paid) and order-book depth (no venue publishes it historically).
@@ -16,12 +17,14 @@ calibrated on it uses percentage changes, never levels, which are venue-specific
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import httpx
 
+from backend.core.observation import MACRO
 from backend.research import store
+from backend.sources import calendar
 
 BINANCE_FUTURES = "https://fapi.binance.com"
 BINANCE_SPOT = "https://api.binance.com"
@@ -112,6 +115,26 @@ def _bybit_windowed(client, conn, instrument: str, *, metric: str, path: str, pa
         start = end + 1
         time.sleep(0.05)
     return written
+
+
+def backfill_events(*, since: datetime = DEFAULT_SINCE, log=print) -> int:
+    """The macro event calendar (sources/calendar.py) since `since`, a month earlier so
+    the first grid instants already have events behind them. Market-wide: stored once
+    under MACRO. Past dates only, so re-running just adds what has happened since."""
+    with httpx.Client() as client:
+        found, errors = calendar.fetch_events(
+            client, since=(since - timedelta(days=31)).date(), now=datetime.now(timezone.utc)
+        )
+    for e in errors:
+        log(f"events: {e}")
+    if not calendar.fred_key():
+        log(f"events: {calendar.FRED_KEY_ENV} not set, so only FOMC decisions were fetched")
+    with store.connection() as conn:
+        for kind in calendar.EVENT_KINDS:
+            store.write(conn, MACRO, store.EVENT, kind, [(int(at.timestamp()), "1") for k, at in found if k == kind])
+    for kind in calendar.EVENT_KINDS:
+        log(f"events: {kind}: {sum(1 for k, _ in found if k == kind)}")
+    return len(found)
 
 
 def backfill(instrument: str, *, since: datetime = DEFAULT_SINCE, client: httpx.Client | None = None, log=print) -> dict[str, int]:

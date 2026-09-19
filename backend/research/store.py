@@ -25,6 +25,7 @@ PERP_VOLUME = "perp_volume"  # Binance perp base-asset volume per 15m bar
 SPOT_VOLUME = "spot_volume"  # Binance spot base-asset volume per 15m bar
 FUNDING = "funding"          # settled funding rate, percent per settlement
 OI = "oi"                    # Bybit linear open interest, coins, 15m snapshots
+EVENT = "event"              # scheduled macro events under instrument MACRO, venue = kind, value 1
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS series (

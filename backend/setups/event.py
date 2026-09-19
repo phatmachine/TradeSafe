@@ -1,22 +1,32 @@
 """Layer 3 — event decompression. "A dated, primary-sourced event with verifiable
 one-sided positioning. Traded after the event resolves, not into it."
 
-Event ingestion (FOMC/filing/unlock calendars) is one of the doctrine's own open items
-("Required, no cost" issuer/calendar sources — implementation spec, Third-party
-integrations) and is not fully wired up in this build: this module evaluates the
-condition correctly against whatever EVENT observations exist, but will honestly report
-`unknown` rather than `pass` until a real calendar source is registered for the
-instrument. That is fail-closed behaviour, not a bug.
+Events are scheduled, market-wide US macro releases (sources/calendar.py): CPI, the jobs
+report and PCE from FRED's release calendar, and FOMC decisions from the Fed's own
+calendar, each at its fixed release time. Two readings make the doctrine line checkable:
+
+- "After the event resolves" = the most recent event happened within the last
+  `event.resolved_within_hours`. Any past event would not do: with monthly releases one
+  has always happened in the last month, and the setup would fire on funding alone.
+- "One-sided positioning" is read going INTO the event: the cross-venue funding means of
+  the `funding_periods` periods just before it all share a sign and exceed
+  `event.one_sided_funding_min_pct` — who was crowded when the news landed, not who is
+  crowded now.
+
+It doesn't say which way that resolves: report/contract.py reads it "unclear". The
+research harness scores the fade-the-crowd reading without the live path claiming it.
 """
 from __future__ import annotations
 
 from decimal import Decimal
 
+from backend.compute.funding import period_means
 from backend.core.config import Config
 from backend.core.observation import Metric, Observation
 from backend.gates.common import ConditionResult, GateResult
 
 SETUP_NAME = "event_decompression"
+EVENT_LABELS = {"us_cpi": "US CPI", "us_jobs": "US jobs report", "us_pce": "US PCE inflation", "fomc": "FOMC decision"}
 
 
 def evaluate(
@@ -27,56 +37,51 @@ def evaluate(
     as_of,
     cfg: Config,
 ) -> GateResult:
-    conditions: list[ConditionResult] = []
+    resolved_hours = float(cfg.get("event", "resolved_within_hours", default=24))
+    one_sided_min = Decimal(str(cfg.get("event", "one_sided_funding_min_pct", default=0.02)))
     funding_periods = int(cfg.get("funding_periods", default=3))
-    one_sided_threshold = Decimal(str(cfg.get("gate_u", "rv_band_min", default=0.20))) / 10  # small, explicit fraction
+    period_seconds = int(cfg.get("cascade", "bar_seconds", default=900))
+    event_threshold = f"a scheduled event within the last {resolved_hours:g}h"
+    funding_threshold = f"same sign, |funding| > {one_sided_min} for the {funding_periods} periods before the event"
 
-    events = [o for o in event_history if o.metric == Metric.EVENT and o.observed_at <= as_of]
+    events = sorted(
+        (o for o in event_history if o.metric == Metric.EVENT and o.observed_at <= as_of), key=lambda o: o.observed_at
+    )
     if not events:
-        conditions.append(
-            ConditionResult(
-                name="event_dated_and_resolved",
-                status="unknown",
-                computed_value=None,
-                threshold="a primary-sourced event with observed_at <= as_of",
-                detail="no dated event observation registered for this instrument",
-            )
-        )
-    else:
-        most_recent = max(events, key=lambda o: o.observed_at)
-        conditions.append(
-            ConditionResult(
-                name="event_dated_and_resolved",
-                status="pass",
-                computed_value=str(most_recent.observed_at),
-                threshold="a primary-sourced event with observed_at <= as_of",
-                detail=f"resolved event from {most_recent.source_id}",
-            )
-        )
+        missing = "no dated event registered"
+        return GateResult(gate=SETUP_NAME, conditions=(
+            ConditionResult("event_dated_and_resolved", "unknown", None, event_threshold, missing),
+            ConditionResult("one_sided_positioning_verifiable", "unknown", None, funding_threshold,
+                            "no event to read positioning going into"),
+        ))
 
-    funding_series = sorted((o.value for o in funding_history), key=lambda v: v)
-    recent = [o.value for o in sorted(funding_history, key=lambda o: o.observed_at)][-funding_periods:]
-    if len(recent) < funding_periods:
-        conditions.append(
-            ConditionResult(
-                name="one_sided_positioning_verifiable",
-                status="unknown",
-                computed_value=None,
-                threshold=f"consistent sign, |funding| > {one_sided_threshold}",
-                detail="insufficient funding history",
-            )
+    last = events[-1]
+    label = EVENT_LABELS.get(last.venue, last.venue)
+    hours_since = (as_of - last.observed_at).total_seconds() / 3600
+    conditions = [
+        ConditionResult(
+            name="event_dated_and_resolved",
+            status="pass" if hours_since <= resolved_hours else "fail",
+            computed_value=f"{label}, {hours_since:.1f}h ago",
+            threshold=event_threshold,
+            detail=f"most recent: {label} at {last.observed_at:%Y-%m-%d %H:%M} UTC",
         )
-    else:
-        signs = {v > 0 for v in recent}
-        one_sided = len(signs) == 1 and all(abs(v) > one_sided_threshold for v in recent)
-        conditions.append(
-            ConditionResult(
-                name="one_sided_positioning_verifiable",
-                status="pass" if one_sided else "fail",
-                computed_value=recent,
-                threshold=f"consistent sign, |funding| > {one_sided_threshold}",
-                detail="funding sign and magnitude across venues as a positioning proxy",
-            )
-        )
+    ]
 
+    before = [o for o in funding_history if o.observed_at < last.observed_at]
+    means = period_means(before, period_seconds)[-funding_periods:]
+    if len(means) < funding_periods:
+        conditions.append(ConditionResult(
+            "one_sided_positioning_verifiable", "unknown", None, funding_threshold,
+            f"fewer than {funding_periods} funding periods recorded before the {label}",
+        ))
+    else:
+        one_sided = len({v > 0 for v in means}) == 1 and all(abs(v) > one_sided_min for v in means)
+        conditions.append(ConditionResult(
+            name="one_sided_positioning_verifiable",
+            status="pass" if one_sided else "fail",
+            computed_value=means,
+            threshold=funding_threshold,
+            detail=f"cross-venue mean funding going into the {label}, as a positioning proxy",
+        ))
     return GateResult(gate=SETUP_NAME, conditions=tuple(conditions))

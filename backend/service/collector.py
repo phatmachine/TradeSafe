@@ -20,7 +20,9 @@ import httpx
 from backend.core.config import Config, load_config
 from backend.core.observation import Metric
 from backend.scripts import backfill_history
-from backend.sources import binance, bybit, chain, coinalyze, coinbase, hyperliquid, issuer, kraken, okx, okx_liquidations
+from backend.sources import (
+    binance, bybit, calendar, chain, coinalyze, coinbase, hyperliquid, issuer, kraken, okx, okx_liquidations,
+)
 from backend.sources.base import SourceError
 from backend.sources.liquidations import run_liquidation_listeners
 from backend.store import db
@@ -68,6 +70,10 @@ COINALYZE_CALLS_PER_MINUTE = 30
 # About what Coinalyze keeps at 1-minute granularity: a cold start fills this much.
 COINALYZE_LOOKBACK = timedelta(hours=24)
 COINALYZE_OVERLAP = timedelta(minutes=10)
+# The macro event calendar (sources/calendar.py): a release lands in the store within
+# this long of happening, and each poll re-reads this far back.
+CALENDAR_POLL_INTERVAL_SECONDS = 900
+CALENDAR_LOOKBACK = timedelta(days=60)
 
 # Compaction (store.db.compact_observations): rows older than COMPACT_AFTER are thinned
 # to one per 15 minutes per series, hourly. Without it every 10-second poll is kept for
@@ -333,6 +339,52 @@ async def coinalyze_liquidation_poll_loop(stop_event: asyncio.Event) -> None:
                 pass
 
 
+def collect_calendar_events(cfg: Config, *, client: httpx.Client, now: datetime | None = None) -> tuple[int, list[str]]:
+    """Stores every scheduled macro event of the last CALENDAR_LOOKBACK that has happened
+    and isn't stored yet, once per kind and time. Returns (rows written, source errors)."""
+    now = now or datetime.now(timezone.utc)
+    since = now - CALENDAR_LOOKBACK
+    found, errors = calendar.fetch_events(client, since=since.date(), now=now)
+    written = 0
+    with db.get_connection() as conn:
+        for kind in {k for k, _ in found}:
+            seen = {
+                at for at, _ in db.observation_keys_since(
+                    conn, instrument=calendar.MACRO, metric=Metric.EVENT,
+                    source_id=calendar.SOURCE_IDS[kind], since=since, venue=kind,
+                )
+            }
+            for k, at in found:
+                if k == kind and at >= since and at.isoformat() not in seen:
+                    db.insert_observation(conn, calendar.to_observation(kind, at, cfg))
+                    written += 1
+    return written, errors
+
+
+async def calendar_poll_loop(stop_event: asyncio.Event) -> None:
+    cfg = load_config()
+    if not calendar.fred_key():
+        logger.info("collector: %s not set, so only FOMC dates are collected (no CPI, jobs or PCE)", calendar.FRED_KEY_ENV)
+    with httpx.Client() as client:
+        while not stop_event.is_set():
+            try:
+                n, errors = await asyncio.to_thread(collect_calendar_events, cfg, client=client)
+                if n:
+                    logger.info("collector: stored %d macro events", n)
+                for detail in errors:
+                    logger.info("collector: macro calendar source failed: %s", detail)
+                    with db.get_connection() as conn:
+                        db.record_collector_event(
+                            conn, source_id="calendar", venue="calendar", event_type="fetch_failed", detail=detail
+                        )
+            except Exception:  # noqa: BLE001 - never let a bad page stop the loop
+                logger.exception("collector: unexpected error in the macro calendar")
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=CALENDAR_POLL_INTERVAL_SECONDS)
+            except asyncio.TimeoutError:
+                pass
+
+
 def _floor_to_bucket(at: datetime) -> datetime:
     bucket = db.COMPACTION_BUCKET_SECONDS
     return datetime.fromtimestamp(int(at.timestamp()) // bucket * bucket, tz=timezone.utc)
@@ -465,6 +517,7 @@ async def main() -> None:
         liquidation_supervisor(stop_event),
         okx_liquidation_poll_loop(stop_event),
         coinalyze_liquidation_poll_loop(stop_event),
+        calendar_poll_loop(stop_event),
         compaction_loop(stop_event),
     )
 
