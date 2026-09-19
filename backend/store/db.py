@@ -337,17 +337,25 @@ def latest_observed_at(
 
 
 def observation_keys_since(
-    conn: sqlite3.Connection, *, instrument: str, metric: Metric, source_id: str, since: datetime
+    conn: sqlite3.Connection,
+    *,
+    instrument: str,
+    metric: Metric,
+    source_id: str,
+    since: datetime,
+    venue: str | None = None,
 ) -> set[tuple[str, str]]:
     """(observed_at, value) of every stored row at or after `since` — what a polled
     event feed (whose pages overlap from one poll to the next) dedupes against before
-    inserting, so the same discrete event is never counted twice."""
-    rows = conn.execute(
-        """SELECT observed_at, value FROM observations
-           WHERE instrument = ? AND metric = ? AND source_id = ? AND observed_at >= ?""",
-        (instrument, metric.value, source_id, _iso(since)),
-    ).fetchall()
-    return {(r[0], r[1]) for r in rows}
+    inserting, so the same discrete event is never counted twice. `venue` narrows it for
+    a source that carries several venues."""
+    sql = """SELECT observed_at, value FROM observations
+             WHERE instrument = ? AND metric = ? AND source_id = ? AND observed_at >= ?"""
+    params: list = [instrument, metric.value, source_id, _iso(since)]
+    if venue is not None:
+        sql += " AND venue = ?"
+        params.append(venue)
+    return {(r[0], r[1]) for r in conn.execute(sql, params).fetchall()}
 
 
 def get_source_state(conn: sqlite3.Connection, source_id: str) -> dict:

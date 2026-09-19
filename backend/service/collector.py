@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 import signal
 from datetime import datetime, timedelta, timezone
 
@@ -19,7 +20,7 @@ import httpx
 from backend.core.config import Config, load_config
 from backend.core.observation import Metric
 from backend.scripts import backfill_history
-from backend.sources import binance, bybit, chain, coinbase, hyperliquid, issuer, kraken, okx, okx_liquidations
+from backend.sources import binance, bybit, chain, coinalyze, coinbase, hyperliquid, issuer, kraken, okx, okx_liquidations
 from backend.sources.base import SourceError
 from backend.sources.liquidations import run_liquidation_listeners
 from backend.store import db
@@ -61,6 +62,12 @@ LIQUIDATION_POLL_INTERVAL_SECONDS = 15
 # binance: websocket (sources/liquidations.py) — frames don't flow in this environment
 # okx: REST poll (sources/okx_liquidations.py) — the one that actually delivers here
 LIQUIDATION_SUPPORTED_VENUES = {"binance", "okx"}
+# binance + bybit, per minute, via Coinalyze (sources/coinalyze.py). Each symbol costs one
+# call of the free tier's 40 a minute; the poll stretches to stay under this many.
+COINALYZE_CALLS_PER_MINUTE = 30
+# About what Coinalyze keeps at 1-minute granularity: a cold start fills this much.
+COINALYZE_LOOKBACK = timedelta(hours=24)
+COINALYZE_OVERLAP = timedelta(minutes=10)
 
 # Compaction (store.db.compact_observations): rows older than COMPACT_AFTER are thinned
 # to one per 15 minutes per series, hourly. Without it every 10-second poll is kept for
@@ -201,6 +208,81 @@ async def okx_liquidation_poll_loop(stop_event: asyncio.Event) -> None:
                 pass
 
 
+async def collect_coinalyze_liquidations(
+    instruments: list[str], cfg: Config, *, client: httpx.AsyncClient, now: datetime | None = None
+) -> int:
+    """One poll of Binance and Bybit per-minute liquidations for the whole watchlist.
+    Starts a little before the oldest instrument's newest stored minute (a day back for
+    one never collected), and stores each minute and side once: a later revision of a
+    minute already stored is not added on top of it. Returns the rows written."""
+    source_id = coinalyze.SOURCE_ID
+    now = now or datetime.now(timezone.utc)
+    floor = now - COINALYZE_LOOKBACK
+    with db.get_connection() as conn:
+        latest = [
+            db.latest_observed_at(conn, instrument=i, metric=Metric.LIQUIDATION, source_id=source_id)
+            for i in instruments
+        ]
+    since = max(floor, min((t or floor) for t in latest) - COINALYZE_OVERLAP) if latest else floor
+    observations = await coinalyze.fetch_since(instruments, cfg, client=client, since=since, now=now)
+    if not observations:
+        return 0
+    written = 0
+    with db.get_connection() as conn:
+        for (instrument, venue) in {(o.instrument, o.venue) for o in observations}:
+            seen = {
+                (at, value.startswith("-"))
+                for at, value in db.observation_keys_since(
+                    conn, instrument=instrument, metric=Metric.LIQUIDATION, source_id=source_id, since=since, venue=venue
+                )
+            }
+            for obs in observations:
+                if obs.instrument != instrument or obs.venue != venue:
+                    continue
+                key = (obs.observed_at.isoformat(), obs.value < 0)
+                if key not in seen:
+                    db.insert_observation(conn, obs)
+                    seen.add(key)
+                    written += 1
+        db.record_source_success(conn, source_id)
+    return written
+
+
+async def coinalyze_liquidation_poll_loop(stop_event: asyncio.Event) -> None:
+    """Off entirely without an API key. Failures are logged as collector_events, not
+    counted against the source's reliability register (same reasoning as OKX's loop)."""
+    if not coinalyze.api_key():
+        logger.info("collector: %s not set, so Binance/Bybit liquidations are not collected", coinalyze.API_KEY_ENV)
+        return
+    cfg = load_config()
+    async with httpx.AsyncClient() as client:
+        while not stop_event.is_set():
+            with db.get_connection() as conn:
+                instruments = db.list_watched_instruments(conn)
+            try:
+                n = await collect_coinalyze_liquidations(instruments, cfg, client=client)
+                if n:
+                    logger.debug("collector: %d new coinalyze liquidation minutes", n)
+            except SourceError as exc:
+                logger.info("collector: coinalyze liquidations failed: %s", exc)
+                with db.get_connection() as conn:
+                    db.record_collector_event(
+                        conn, source_id=coinalyze.SOURCE_ID, venue="coinalyze", event_type="fetch_failed", detail=str(exc)
+                    )
+            except Exception as exc:  # noqa: BLE001 - never let a bad payload stop the loop
+                logger.exception("collector: unexpected error in coinalyze liquidations")
+                with db.get_connection() as conn:
+                    db.record_collector_event(
+                        conn, source_id=coinalyze.SOURCE_ID, venue="coinalyze", event_type="unexpected_error", detail=str(exc)
+                    )
+            calls = len(coinalyze.symbols_for(instruments))
+            interval = 60 * max(1, math.ceil(calls / COINALYZE_CALLS_PER_MINUTE))
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval)
+            except asyncio.TimeoutError:
+                pass
+
+
 def _floor_to_bucket(at: datetime) -> datetime:
     bucket = db.COMPACTION_BUCKET_SECONDS
     return datetime.fromtimestamp(int(at.timestamp()) // bucket * bucket, tz=timezone.utc)
@@ -332,6 +414,7 @@ async def main() -> None:
         fast_poll_loop(stop_event),
         liquidation_supervisor(stop_event),
         okx_liquidation_poll_loop(stop_event),
+        coinalyze_liquidation_poll_loop(stop_event),
         compaction_loop(stop_event),
     )
 

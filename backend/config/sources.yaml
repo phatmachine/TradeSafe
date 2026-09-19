@@ -73,6 +73,18 @@ sources:
       Aggregates self-reported and on-chain data; used only as a cross-check per 0.3,
       never as the sole free-float source. Never used to satisfy tier_sufficiency alone.
 
+  - source_id: coinalyze
+    name: "Coinalyze free API: per-exchange, per-minute liquidations (Binance, Bybit)"
+    upstream_id: coinalyze
+    collection_method: aggregator_api
+    tier: T2
+    metrics: [liquidations]
+    note: >
+      Enabled 2026-09-19 for a gap measured, not assumed: Binance and Bybit publish
+      liquidations only over websockets, which don't flow in this deployment, so OKX was
+      the only liquidation feed. Second-hand totals of throttled exchange samples: cohort
+      and print-settled input only, never a decision metric. Needs COINALYZE_API_KEY.
+
   # Optional / disabled by default per implementation-spec "Spend nothing until
   # calibration" — flip enabled: true only once a specific gap appears in the sweep.
   - source_id: coinglass
