@@ -23,7 +23,7 @@ advice — no orders, sizes or targets; alert and UI wording stays factual, neve
 
 Three processes, all from the repo root (imports are `backend.…`, so not from `backend/`):
 
-```
+```bash
 # API (needs TRADESAFE_PASSWORD + TRADESAFE_SECRET; INSECURE_COOKIE for plain http)
 TRADESAFE_PASSWORD=devpass TRADESAFE_SECRET=devsecret TRADESAFE_INSECURE_COOKIE=true \
   .venv/Scripts/python.exe -m uvicorn backend.service.api:app --port 8000
@@ -47,7 +47,7 @@ cd web && npm run dev
   missing bars once flipped ZEC's regime. The price backfill now fills gaps on its own.
 - Scratch files: use the session scratchpad, not `$TMPDIR` (empty in Git Bash here).
 
-## Deploying (live: https://tradesafe.srv1612559.hstgr.cloud)
+## Deploying (live: <https://tradesafe.srv1612559.hstgr.cloud>)
 
 Hostinger VPS 1612559, Docker Compose project `tradesafe` (Traefik in front; the
 standalone Caddy variant is `deploy/docker-compose.standalone.yml`).
