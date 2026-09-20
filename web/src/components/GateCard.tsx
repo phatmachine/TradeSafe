@@ -56,6 +56,27 @@ function conditionTag(gateCase: GateCase | undefined, c: ConditionResult) {
   return null;
 }
 
+// One check, with the marker, its long lean, and where it currently sits. Shared with
+// AbsorptionCard, which lays the same rows out under its own headings.
+export function ConditionRow({ gateCase, c }: { gateCase: GateCase | undefined; c: ConditionResult }) {
+  const tag = conditionTag(gateCase, c);
+  return (
+    <div className="condition-row">
+      <span className={`condition-marker ${c.status}`}>{MARKER[c.status]}</span>
+      <div className="condition-body">
+        <div className="condition-name">
+          {c.name.replace(/_/g, " ")}
+          {tag && <span className={tag.className}>{tag.label}</span>}
+        </div>
+        <div className="condition-values mono" title={`${c.computed_value ?? "—"} vs ${c.threshold ?? "—"}`}>
+          now {readable(c.computed_value)} <span style={{ opacity: 0.6 }}>· threshold</span> {readable(c.threshold)}
+        </div>
+        <div className="condition-detail">{c.detail}</div>
+      </div>
+    </div>
+  );
+}
+
 function Score({ gate, isSetup }: { gate: GateResultJSON; isSetup: boolean }) {
   const total = gate.conditions.length;
   const met = gate.conditions.filter((c) => c.status === "pass").length;
@@ -108,24 +129,9 @@ export function GateCard({ gate, title }: { gate: GateResultJSON; title?: string
       </div>
       {about && <div className="case-note">{about}</div>}
       <Score gate={gate} isSetup={isSetup} />
-      {gate.conditions.map((c) => {
-        const tag = conditionTag(gate.case, c);
-        return (
-          <div className="condition-row" key={c.name}>
-            <span className={`condition-marker ${c.status}`}>{MARKER[c.status]}</span>
-            <div className="condition-body">
-              <div className="condition-name">
-                {c.name.replace(/_/g, " ")}
-                {tag && <span className={tag.className}>{tag.label}</span>}
-              </div>
-              <div className="condition-values mono" title={`${c.computed_value ?? "—"} vs ${c.threshold ?? "—"}`}>
-                now {readable(c.computed_value)} <span style={{ opacity: 0.6 }}>· threshold</span> {readable(c.threshold)}
-              </div>
-              <div className="condition-detail">{c.detail}</div>
-            </div>
-          </div>
-        );
-      })}
+      {gate.conditions.map((c) => (
+        <ConditionRow gateCase={gate.case} c={c} key={c.name} />
+      ))}
     </div>
   );
 }

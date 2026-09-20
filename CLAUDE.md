@@ -158,6 +158,17 @@ and setup code over ~3.7 years of free history (~3 min). Findings, 2026-09-19:
   typical win); BTC/ETH/ZEC ahead, SOL behind. Suggestive at this sample size, not
   proven — the live report still calls it "direction unclear". Its bottleneck is
   one-sided funding going into the event (1.1% of hours).
+- **Cascade and squeeze are not two independent readings** (measured 2026-09-20, hourly
+  grid, 127,328 instants over BTC/ETH/SOL/ZEC, 45,499 of them mean-reverting). Three of
+  their five checks — `oi_collapse_confirmed_and_held`, `price_range_contracted`,
+  `liquidation_print_settled` — are the same computation on the same inputs, so the two
+  scores can differ by at most 2 and share a floor. Identical score **39.1%** of hours;
+  short ahead 49.9%, long ahead only 10.9%. The two checks that *do* differ carry no
+  direction: by lean (+2/+1/−1/−2) price was higher 7 days later 51.4 / 51.2 / 50.9 /
+  51.4% against a **51.4%** base rate, so a maximally long-leaning card and a maximally
+  short-leaning one give the same answer. A faint 3-day spread (+2 52.3% vs −2 48.8%)
+  reverses across coins (BTC lean+2 66%, ZEC 41%) — noise, not a coin effect. The pair
+  never both qualified (0 of 45,499), so the doctrine's mutual exclusion holds unaided.
 
 ## Decisions made (and why)
 
@@ -179,6 +190,15 @@ and setup code over ~3.7 years of free history (~3 min). Findings, 2026-09-19:
 - UI colours: inside setup cards green/red mean long/short only (a met check's bar is
   green if it supports a long, red if against); unmet checks are grey. Trust-check cards
   keep green/red for pass/fail.
+- **One absorption card, not two** (`web/src/components/AbsorptionCard.tsx`). Rendering
+  cascade and squeeze as separate cards printed two "N of 5" scores that share three
+  identical checks, presenting arithmetic symmetry as market balance — the numbers are
+  above. The pair now renders as one card: the three shared preconditions stated once and
+  coloured neutral (they support neither side), the two side-specific checks as a labelled
+  split with no per-side score, and a note that funding's usual positive sign makes the
+  short side's funding check pass far more often. "Distance to flip" collapses the
+  duplicated shared rows under "absorption — both sides". Presentation only — the report
+  contract, verdicts, structural reads, scanner and alerts are untouched.
 - **Alerts**: a scanner in the API process (not the collector, which holds no decision
   logic) runs every watched coin every `TRADESAFE_SCAN_INTERVAL_MINUTES` (default 15)
   and records one alert per episode; a failed trust gate doesn't end an episode. Delivery
@@ -202,6 +222,26 @@ and setup code over ~3.7 years of free history (~3 min). Findings, 2026-09-19:
 - **Order-book depth covers a sliver of its ±1% band**: 100 levels (Binance, OKX) and
   50 (Bybit) reach only ±0.016–0.17% of mid, so depth reads ~6–28x low (BTC Binance
   22 vs 610 BTC). Errs safe today (size placeholder); fix before setting a real size.
+- **`funding_reset` is a sign test against a one-sided distribution** (needs a decision).
+  `backend/setups/cascade.py` asks `all(f <= 0)` for the long side and `all(f >= 0)` for
+  the short. Settled funding is positive 86% (BTC), 86% (ETH), 70% (SOL), 81% (ZEC) of
+  the time and *never* exactly zero in 4,070 readings per coin, so the short side passes
+  **81.5%** of mean-reverting instants against the long side's **16.6%**. That one check
+  makes squeeze qualify 2.8x as often as cascade (3.06% vs 1.08%) and tilts the pair
+  short for a reason unrelated to the market. Candidates measured offline over the same
+  hourly history, as long pass / short pass, then cascade / squeeze qualification rate,
+  then `spread` = the 7-day win rate at maximum long lean minus maximum short lean
+  (base rate 51.4%):
+  - sign test (live): 16.6% / 81.5%, qualifies 1.08% / 3.06%, spread +0.0pp
+  - symmetric band, absolute funding under 0.01 on both sides: 85.1% / 85.1%,
+    qualifies 3.21% / 3.20%, spread +0.1pp
+  - trailing-30-day percentile 25/75: 37.9% / 34.5%, qualifies 2.05% / 1.51%, spread +2.0pp
+
+  The band removes the asymmetry outright at no directional cost — there was none to
+  lose — and treats the reset as the precondition the doctrine calls it. The percentile
+  keeps a side distinction worth ~2pp, which is under 1.5σ at n≈3,000 and not proven.
+  Left unchanged: it changes what qualifies, so it is a decision, not a tidy-up. The
+  check has no thresholds.yaml path, so `research sweep` can't reach it as written.
 - **Funding isn't normalised to the settlement interval**: every rate is labelled per
   8 h. True for BTC/ETH/SOL/ZEC/XRP; TAO settles every 4 h on Binance and Bybit, and
   Binance shortens intervals for any coin in extreme moves. Read the interval per venue.

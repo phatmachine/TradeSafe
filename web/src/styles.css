@@ -406,6 +406,44 @@ body {
   margin: -4px 0 8px;
 }
 
+/* Absorption card: the mirrored pair's two side-specific checks, side by side, so the
+   shared preconditions above are read once rather than as two competing scores. */
+.split-heading {
+  margin: 14px 0 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.side-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 18px;
+}
+
+.side-column { min-width: 0; }
+
+.side-column .condition-row:first-child { border-top: none; }
+
+.side-label {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 0 2px;
+}
+.side-label.long { color: var(--accent); }
+.side-label.short { color: var(--red); }
+
+.side-split-note { margin: 10px 0 0; }
+
+@media (max-width: 640px) {
+  .side-split { grid-template-columns: 1fr; }
+  .side-column + .side-column .side-label { border-top: 1px solid var(--border); margin-top: 6px; }
+}
+
 .factor-row {
   padding: 10px 0;
   border-top: 1px solid var(--border);

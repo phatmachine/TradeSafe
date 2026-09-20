@@ -1,6 +1,32 @@
-import { AnalysisReport } from "../api";
+import { AnalysisReport, DistanceToFlipItem } from "../api";
 import { readable } from "../format";
+import { AbsorptionCard, SHARED } from "./AbsorptionCard";
 import { GateCard } from "./GateCard";
+
+// Cascade and squeeze share three of their five checks (see AbsorptionCard), so a failing
+// shared check is one fact about the market that the report otherwise states once per
+// side. Collapse those duplicates and name them for what they are.
+const ABSORPTION = ["cascade_absorption", "squeeze_absorption"];
+
+function dedupeFlip(items: DistanceToFlipItem[]): DistanceToFlipItem[] {
+  const seen = new Set<string>();
+  const out: DistanceToFlipItem[] = [];
+  for (const f of items) {
+    if (!ABSORPTION.includes(f.gate)) {
+      out.push(f);
+      continue;
+    }
+    if (!SHARED.includes(f.condition)) {
+      out.push(f);
+      continue;
+    }
+    const key = `${f.condition}|${f.current_value}|${f.required}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ ...f, gate: "absorption — both sides" });
+  }
+  return out;
+}
 
 const VERDICT_COPY: Record<string, { label: string; className: string; explain: string }> = {
   ELIGIBLE_SETUP: {
@@ -192,9 +218,21 @@ export function ReportView({ report }: { report: AnalysisReport }) {
               </div>
             )}
           </div>
-          {report.setup_evaluation.map((s) => (
-            <GateCard gate={s} key={s.gate} />
-          ))}
+          {(() => {
+            const long = report.setup_evaluation.find((s) => s.gate === "cascade_absorption");
+            const short = report.setup_evaluation.find((s) => s.gate === "squeeze_absorption");
+            const paired = long && short;
+            return (
+              <>
+                {paired && <AbsorptionCard long={long} short={short} />}
+                {report.setup_evaluation
+                  .filter((s) => !(paired && ABSORPTION.includes(s.gate)))
+                  .map((s) => (
+                    <GateCard gate={s} key={s.gate} />
+                  ))}
+              </>
+            );
+          })()}
         </div>
       )}
 
@@ -224,7 +262,7 @@ export function ReportView({ report }: { report: AnalysisReport }) {
         <div className="section">
           <div className="section-title">Distance to flip</div>
           <div className="card">
-            {report.distance_to_flip.map((f, i) => (
+            {dedupeFlip(report.distance_to_flip).map((f, i) => (
               <div className="flip-item" key={i}>
                 <div className="flip-title">
                   [{f.gate.replace(/_/g, " ")}] {f.condition.replace(/_/g, " ")}
