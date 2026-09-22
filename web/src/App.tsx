@@ -53,6 +53,23 @@ export default function App() {
     }
   }
 
+  async function removeInstrument(sym: string) {
+    // Collection stops with it, and the order books and liquidations it misses can't be
+    // fetched later, so a stray tap shouldn't be enough.
+    const ok = window.confirm(
+      `Stop watching ${sym}?\n\nThe collector stops recording it and the scanner stops checking it. ` +
+        `Analysing it again adds it back, but some of the history missed in between can't be filled in.`
+    );
+    if (!ok) return;
+    setWatchlist((w) => w.filter((s) => s !== sym));
+    try {
+      await api.removeInstrument(sym);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "could not reach the server");
+    }
+    refreshWatchlist();
+  }
+
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     runReport(symbol);
@@ -120,13 +137,19 @@ export default function App() {
       {watchlist.length > 0 && (
         <div className="chip-row">
           {watchlist.map((sym) => (
-            <button
-              key={sym}
-              className={`chip ${sym === report?.instrument ? "active" : ""}`}
-              onClick={() => runReport(sym)}
-            >
-              {sym}
-            </button>
+            <span key={sym} className={`chip ${sym === report?.instrument ? "active" : ""}`}>
+              <button className="chip-label" onClick={() => runReport(sym)}>
+                {sym}
+              </button>
+              <button
+                className="chip-remove"
+                onClick={() => removeInstrument(sym)}
+                aria-label={`Stop watching ${sym}`}
+                title={`Stop watching ${sym}`}
+              >
+                ×
+              </button>
+            </span>
           ))}
         </div>
       )}

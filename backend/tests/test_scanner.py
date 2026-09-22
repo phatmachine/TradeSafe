@@ -45,6 +45,18 @@ def test_a_failed_trust_gate_does_not_end_an_episode():
     assert scan(report("ELIGIBLE_SETUP", passing=["squeeze_absorption"])) == []
 
 
+def test_removing_an_instrument_ends_its_episodes():
+    with db.get_connection() as conn:
+        db.add_watched_instrument(conn, "ZEC")
+    assert len(scan(report("ELIGIBLE_SETUP", passing=["squeeze_absorption"]))) == 1
+    with db.get_connection() as conn:
+        db.remove_watched_instrument(conn, "zec")
+        assert db.list_watched_instruments(conn) == []
+        db.add_watched_instrument(conn, "ZEC")
+    # Back on the watchlist and still qualifying: announced again, not taken as the old episode.
+    assert len(scan(report("ELIGIBLE_SETUP", passing=["squeeze_absorption"]))) == 1
+
+
 def test_alerts_are_listed_newest_first_after_the_last_one_seen():
     scan(report("ELIGIBLE_SETUP", passing=["squeeze_absorption"]))
     with db.get_connection() as conn:

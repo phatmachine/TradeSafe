@@ -150,11 +150,12 @@ body {
 
 .chip {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
   background: var(--bg-card);
   border: 1px solid var(--border);
   color: var(--text-dim);
   border-radius: 999px;
-  padding: 8px 14px;
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
@@ -164,6 +165,24 @@ body {
   border-color: var(--accent);
   color: var(--accent);
 }
+
+.chip-label,
+.chip-remove {
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.chip-label { padding: 8px 4px 8px 14px; }
+.chip-remove {
+  padding: 6px 12px 6px 6px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-faint);
+}
+.chip-remove:hover,
+.chip-remove:focus-visible { color: var(--red); }
 
 .verdict-banner {
   border-radius: var(--radius);

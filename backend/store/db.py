@@ -519,7 +519,11 @@ def add_watched_instrument(conn: sqlite3.Connection, instrument: str) -> None:
 
 
 def remove_watched_instrument(conn: sqlite3.Connection, instrument: str) -> None:
+    """Stops collecting and scanning it. Its alert episodes end too: a scan that resumes
+    after it's added back has no record of what qualified before, so a setup qualifying
+    then alerts as new rather than being taken for an episode still running."""
     conn.execute("DELETE FROM watched_instruments WHERE instrument = ?", (instrument.upper(),))
+    conn.execute("DELETE FROM scan_state WHERE instrument = ?", (instrument.upper(),))
 
 
 def list_watched_instruments(conn: sqlite3.Connection) -> list[str]:

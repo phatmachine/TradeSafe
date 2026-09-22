@@ -176,6 +176,7 @@ export const api = {
   authStatus: () => request<{ authenticated: boolean }>("/api/auth/status"),
   instruments: () => request<{ instruments: string[] }>("/api/instruments"),
   addInstrument: (symbol: string) => request<{ ok: boolean; instrument: string }>(`/api/instruments/${symbol}`, { method: "POST" }),
+  removeInstrument: (symbol: string) => request<{ ok: boolean }>(`/api/instruments/${symbol}`, { method: "DELETE" }),
   report: (symbol: string) => request<AnalysisReport>(`/api/report/${symbol}`),
   reportHistory: (symbol: string) => request<{ records: Record<string, unknown>[] }>(`/api/report/${symbol}/history`),
   alerts: (after = 0) => request<AlertsResponse>(`/api/alerts?after=${after}`),
