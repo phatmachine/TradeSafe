@@ -90,4 +90,22 @@ def render_text(report: AnalysisReport) -> str:
                 f"needs {item['required']} — {item['detail']}"
             )
 
+    if d["belief_context"]:
+        bc = d["belief_context"]
+        lines += ["", f"-- {bc['title']} --", f"  {bc['caption']}"]
+        if bc.get("error"):
+            lines.append(f"  {bc['error']}")
+        for src in bc["sources"]:
+            head = f"  [{src['source_id']}{' ' + src['symbol'] if src['symbol'] else ''}] {src['status']}"
+            if src["status"] == "current":
+                head += f"  observed {src['observed_at']}, expires {src['expires_at']}"
+            lines.append(head)
+            if src["detail"]:
+                lines.append(f"    {src['detail']}")
+            for m in src["metrics"]:
+                value = "UNKNOWN" if m["value"] is None else f"{m['value']} {m['unit']}"
+                lines.append(f"    {m['metric']}: {value} — {m['label']}" + (f" ({m['note']})" if m["note"] else ""))
+        if bc["config_hash"]:
+            lines.append(f"  belief config {bc['config_hash']}")
+
     return "\n".join(lines)

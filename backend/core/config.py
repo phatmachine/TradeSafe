@@ -97,4 +97,36 @@ def reload_config() -> Config:
     """Bust the cache — used by tests and by the calibration sweep, which varies
     thresholds across many runs in-process."""
     load_config.cache_clear()
+    load_belief_config.cache_clear()
     return load_config()
+
+
+# T4 belief data (report section 7) has its own config and its own hash. Kept out of
+# thresholds.yaml on purpose: config_hash stamps every DecisionRecord and seeds its
+# run_id, so a belief setting living there would change the decision record whenever it
+# was tuned, which is belief data reaching the decision path by another route.
+BELIEF_FILES = ("belief.yaml", "catalysts.yaml", "t4_spam_patterns.yaml")
+
+
+@dataclass(frozen=True)
+class BeliefConfig:
+    expiry_minutes: int                  # belief.yaml: t4_expiry_minutes
+    min_tagged: int                      # belief.yaml: t4_min_tagged
+    catalysts: dict[str, list[str]]      # catalysts.yaml: instrument -> keywords
+    spam_patterns: tuple[str, ...]       # t4_spam_patterns.yaml: regexes
+    config_hash: str                     # stamped on report section 7, never on a decision
+
+
+@lru_cache(maxsize=1)
+def load_belief_config() -> BeliefConfig:
+    belief = _load_yaml("belief.yaml")
+    catalysts = _load_yaml("catalysts.yaml").get("catalysts") or {}
+    spam = _load_yaml("t4_spam_patterns.yaml").get("patterns") or []
+    combined = hashlib.sha256(":".join(_hash_file(n) for n in BELIEF_FILES).encode()).hexdigest()[:16]
+    return BeliefConfig(
+        expiry_minutes=int(belief["t4_expiry_minutes"]),
+        min_tagged=int(belief["t4_min_tagged"]),
+        catalysts={str(k).upper(): [str(w) for w in (v or [])] for k, v in catalysts.items()},
+        spam_patterns=tuple(str(p) for p in spam),
+        config_hash=combined,
+    )

@@ -25,6 +25,7 @@ from backend.compute.funding import period_means
 from backend.compute.oi import aggregate_oi_series
 from backend.compute.regime import resample_closes
 from backend.core.config import Config
+from backend.core.firewall import decision_path
 from backend.core.observation import Metric, Observation
 from backend.gates.common import ConditionResult, GateResult
 
@@ -32,6 +33,7 @@ SETUP_NAME = "cascade_absorption"
 SHORT_SETUP_NAME = "squeeze_absorption"
 
 
+@decision_path
 def evaluate(
     instrument: str,
     *,

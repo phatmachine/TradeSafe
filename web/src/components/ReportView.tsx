@@ -1,6 +1,7 @@
 import { AnalysisReport, DistanceToFlipItem } from "../api";
 import { readable } from "../format";
 import { AbsorptionCard, SHARED } from "./AbsorptionCard";
+import { BeliefContext } from "./BeliefContext";
 import { GateCard } from "./GateCard";
 
 // Cascade and squeeze share three of their five checks (see AbsorptionCard), so a failing
@@ -276,6 +277,8 @@ export function ReportView({ report }: { report: AnalysisReport }) {
           </div>
         </div>
       )}
+
+      {report.belief_context && <BeliefContext context={report.belief_context} />}
     </div>
   );
 }

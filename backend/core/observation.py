@@ -35,6 +35,17 @@ class Metric(str, Enum):
     ETF_HOLDINGS = "etf_holdings"
     EVENT = "event"
     MARKET_CAP = "market_cap"
+    # T4 belief metrics (sources/stocktwits.py): what participants say, never what is
+    # true. Stored apart from everything above (store table belief_observations) and
+    # stopped at the decision path by core/firewall.py; they reach only report section 7.
+    ST_MSG_COUNT = "st_msg_count"
+    ST_WINDOW_MINUTES = "st_window_minutes"
+    ST_BULL_TAGGED = "st_bull_tagged"
+    ST_BEAR_TAGGED = "st_bear_tagged"
+    ST_BULL_SHARE = "st_bull_share"
+    ST_WATCHERS = "st_watchers"
+    ST_CATALYST_MENTIONS = "st_catalyst_mentions"
+    ST_SPAM_SHARE = "st_spam_share"
 
 
 class Unit(str, Enum):
@@ -45,6 +56,8 @@ class Unit(str, Enum):
     COUNT = "count"
     BOOLEAN = "boolean"
     TIMESTAMP = "timestamp"
+    MINUTES = "minutes"
+    RATIO = "ratio"
 
 
 class Tier(str, Enum):
@@ -54,6 +67,17 @@ class Tier(str, Enum):
     T4 = "T4"
     T0 = "T0"
 
+
+BELIEF_METRICS = frozenset({
+    Metric.ST_MSG_COUNT,
+    Metric.ST_WINDOW_MINUTES,
+    Metric.ST_BULL_TAGGED,
+    Metric.ST_BEAR_TAGGED,
+    Metric.ST_BULL_SHARE,
+    Metric.ST_WATCHERS,
+    Metric.ST_CATALYST_MENTIONS,
+    Metric.ST_SPAM_SHARE,
+})
 
 # Metrics whose expiry can shorten under a "fast tape" (doctrine 0.2 footnote / spec
 # fast_tape_rv_threshold).
@@ -87,6 +111,10 @@ def half_life_seconds(metric: Metric, cfg: Config, *, fast_tape: bool = False) -
         return int(exp.get("supply_float_seconds", 604800))
     if metric == Metric.EVENT:
         return int(exp.get("event_calendar_seconds", 604800))
+    if metric in BELIEF_METRICS:
+        # Belief expiry is config/belief.yaml's t4_expiry_minutes, set by the collector
+        # that builds them, so tuning it can't move thresholds.yaml's config_hash.
+        raise ValueError(f"{metric.value} is a T4 belief metric: its expiry comes from config/belief.yaml")
     # Fail closed on an unmapped metric rather than guessing a TTL.
     raise ValueError(f"no half-life mapping for metric {metric!r}")
 
@@ -95,7 +123,7 @@ def half_life_seconds(metric: Metric, cfg: Config, *, fast_tape: bool = False) -
 class Observation:
     metric: Metric
     instrument: str
-    value: Decimal
+    value: Decimal | None  # None only for T4: a belief metric too thin to state (UNKNOWN)
     unit: Unit
     venue: str
     source_id: str
@@ -110,6 +138,13 @@ class Observation:
             dt = getattr(self, name)
             if dt.tzinfo is None:
                 raise ValueError(f"Observation.{name} must be timezone-aware")
+        # A belief metric is T4 and T4 is only ever a belief metric, so the tier the
+        # firewall checks (core/firewall.py) can't be wrong for either.
+        is_belief = self.tier == Tier.T4
+        if (self.metric in BELIEF_METRICS) != is_belief:
+            raise ValueError(f"{self.metric.value} with tier {self.tier}: belief metrics are T4, and T4 is belief metrics only")
+        if self.value is None and not is_belief:
+            raise ValueError(f"Observation.value is None for {self.metric.value}: only T4 may be UNKNOWN")
 
     def is_expired(self, at: datetime) -> bool:
         return at >= self.expires_at

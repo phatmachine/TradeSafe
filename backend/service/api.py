@@ -18,7 +18,8 @@ from pydantic import BaseModel
 from backend.core.config import load_config
 from backend.core.registry import SourceRegistry
 from backend.replay.source import LiveSource
-from backend.report.contract import persist_report, run_analysis
+from backend.report.belief import build_report
+from backend.report.contract import persist_report
 from backend.report.exit_monitor import evaluate_exit
 from backend.report.render import render_text
 from backend.scripts import backfill_history
@@ -145,7 +146,7 @@ def get_report(symbol: str):
     with db.get_connection() as conn:
         registry = SourceRegistry.from_config(cfg, db.get_all_source_state(conn))
         ds = LiveSource(conn)
-        report = run_analysis(symbol, ds, cfg, registry)
+        report = build_report(symbol, ds, cfg, registry)
         persist_report(conn, report)
         db.add_watched_instrument(conn, symbol)
     return report.to_dict()
@@ -159,7 +160,7 @@ def get_report_text(symbol: str):
     with db.get_connection() as conn:
         registry = SourceRegistry.from_config(cfg, db.get_all_source_state(conn))
         ds = LiveSource(conn)
-        report = run_analysis(symbol, ds, cfg, registry)
+        report = build_report(symbol, ds, cfg, registry)
         persist_report(conn, report)
         db.add_watched_instrument(conn, symbol)
     return Response(content=render_text(report), media_type="text/plain")

@@ -51,6 +51,10 @@ subjects it to the same gate, and shows the failure if it fails.
   derived (aggregators) → actionable only after independent cross-confirmation. T3
   interpreted → hypotheses only, never triggers anything. T4 belief (news/social) →
   evidence of belief, never of fact. T0 rejected → excluded entirely, not down-weighted.
+  In this build T4 is walled off in code, not just unused: it is stored apart,
+  `core/firewall.py` raises if a T4 observation reaches any gate, compute, setup or
+  classifier, and it appears only in report section 7, "Belief context (T4, not
+  evaluated)", after the decision is complete.
 - **0.2 Half-life**: every observation has `observed_at` + an expiry. Expired data is
   deleted from the query path, never used "as old data".
 - **0.3 Independence, not count**: sources sharing an `upstream_id` count as one.

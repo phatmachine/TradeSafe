@@ -10,7 +10,8 @@ import sys
 from backend.core.config import load_config
 from backend.core.registry import SourceRegistry
 from backend.replay.source import LiveSource
-from backend.report.contract import persist_report, run_analysis
+from backend.report.belief import build_report
+from backend.report.contract import persist_report
 from backend.report.render import render_text
 from backend.store import db
 
@@ -25,7 +26,7 @@ def main() -> None:
     with db.get_connection() as conn:
         registry = SourceRegistry.from_config(cfg, db.get_all_source_state(conn))
         ds = LiveSource(conn)
-        report = run_analysis(symbol, ds, cfg, registry)
+        report = build_report(symbol, ds, cfg, registry)
         persist_report(conn, report)
         db.add_watched_instrument(conn, symbol)
     print(render_text(report))

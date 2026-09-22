@@ -21,6 +21,7 @@ from backend.compute.cohort import Cohort
 from backend.compute.oi import aggregate_oi_series
 from backend.compute.regime import Regime
 from backend.core.config import Config
+from backend.core.firewall import decision_path
 from backend.core.observation import Observation
 
 SUPPORTS = "supports_long"
@@ -70,6 +71,7 @@ def funding_factor(funding_current: Decimal | None, cfg: Config) -> dict:
     )
 
 
+@decision_path
 def oi_price_factor(oi_history: list[Observation], price_history: list[Observation], as_of, cfg: Config) -> dict:
     """The OI/price quadrant over the window. Coin OI comes from aggregate_oi_series, which
     holds the venue set fixed across the window, so a venue dropping in or out of the
@@ -152,6 +154,7 @@ def _hourly_ratios(
     return ratios
 
 
+@decision_path
 def perp_spot_factor(
     *,
     perp_now: dict[str, Decimal],
@@ -209,6 +212,7 @@ def perp_spot_factor(
     return _factor(name, value, NEUTRAL, f"within {band:.0%} of this coin's usual mix — the move isn't unusually leverage- or spot-driven")
 
 
+@decision_path
 def directional_factors(
     *,
     regime: Regime,

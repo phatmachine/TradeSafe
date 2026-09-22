@@ -12,6 +12,7 @@ from backend.compute.oi import aggregate_oi_coin
 from backend.compute.ratios import oi_to_market_cap, perp_to_spot_volume
 from backend.compute.volatility import daily_closes, realised_volatility_annualised
 from backend.core.config import Config
+from backend.core.firewall import decision_path
 from backend.core.observation import Metric
 from backend.gates.common import ConditionResult, GateResult
 from backend.replay.source import DataSource
@@ -27,6 +28,7 @@ def _sum_metric(ds: DataSource, instrument: str, metric: Metric) -> Decimal | No
     return sum((o.value for o in per_venue.values()), Decimal(0))
 
 
+@decision_path
 def evaluate(instrument: str, ds: DataSource, cfg: Config) -> GateResult:
     universe_cfg = cfg.universe
     conditions: list[ConditionResult] = []

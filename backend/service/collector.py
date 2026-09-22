@@ -17,11 +17,12 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
-from backend.core.config import Config, load_config
+from backend.core.config import Config, load_belief_config, load_config
 from backend.core.observation import Metric
 from backend.scripts import backfill_history
 from backend.sources import (
     binance, bybit, calendar, chain, coinalyze, coinbase, hyperliquid, issuer, kraken, okx, okx_liquidations,
+    stocktwits,
 )
 from backend.sources.base import SourceError
 from backend.sources.liquidations import run_liquidation_listeners
@@ -390,6 +391,72 @@ async def calendar_poll_loop(stop_event: asyncio.Event) -> None:
                 pass
 
 
+def collect_stocktwits(
+    instruments: list[str], st_cfg: stocktwits.StocktwitsConfig, fetch: stocktwits.Fetcher, *, now: datetime | None = None
+) -> tuple[int, stocktwits.StocktwitsFailure | None]:
+    """One poll of the Stocktwits stream for each instrument. A fetch that fails writes a
+    collector_event and nothing else: no observation, no zero, nothing carried forward.
+    Stops at the first refusal (403, 429, 5xx) rather than asking again for every other
+    symbol. Returns (fetches stored, that refusal or None)."""
+    stored = 0
+    for instrument in instruments:
+        at = now or datetime.now(timezone.utc)
+        try:
+            result = stocktwits.collect(instrument, st_cfg, fetch, now=at)
+        except stocktwits.StocktwitsFailure as exc:
+            with db.get_connection() as conn:
+                db.record_collector_event(
+                    conn, source_id=stocktwits.SOURCE_ID, venue=stocktwits.VENUE, event_type="fetch_failed",
+                    detail=f"{instrument}: {exc}",
+                )
+            if exc.refused:
+                return stored, exc
+            continue
+        with db.get_connection() as conn:
+            db.insert_belief_fetch(
+                conn, source_id=stocktwits.SOURCE_ID, instrument=instrument, collected_at=result.collected_at,
+                body=result.body, observations=result.observations,
+            )
+        stored += 1
+    return stored, None
+
+
+async def stocktwits_poll_loop(stop_event: asyncio.Event) -> None:
+    """T4 belief data for report section 7, every poll_minutes for each watched instrument
+    with a Stocktwits symbol. Off while sources.yaml registers the source disabled. A
+    refusal doubles the wait, up to max_backoff_minutes; a clean poll resets it. Failures
+    are collector_events (the Layer 6 source register's input), deliberately not
+    record_source_failure: two rate limits would demote the source for good."""
+    try:
+        st_cfg = stocktwits.StocktwitsConfig.load(load_config(), load_belief_config())
+    except Exception:  # noqa: BLE001 - a bad belief config must not take the other loops down with it
+        logger.exception("collector: stocktwits config unreadable, so no belief data is collected")
+        return
+    if not st_cfg.enabled:
+        logger.info("collector: stocktwits is disabled in sources.yaml (see its note), so no belief data is collected")
+        return
+    delay = st_cfg.poll_minutes
+    with httpx.Client() as client:
+        fetch = stocktwits.http_fetcher(client)
+        while not stop_event.is_set():
+            with db.get_connection() as conn:
+                instruments = [i for i in db.list_watched_instruments(conn) if i in st_cfg.symbol_map]
+            try:
+                n, refused = await asyncio.to_thread(collect_stocktwits, instruments, st_cfg, fetch)
+                if refused:
+                    delay = min(delay * 2, st_cfg.max_backoff_minutes)
+                    logger.info("collector: stocktwits refused (%s); next poll in %d min", refused, delay)
+                else:
+                    delay = st_cfg.poll_minutes
+                    logger.debug("collector: stored %d stocktwits fetches", n)
+            except Exception:  # noqa: BLE001 - never let a bad payload stop the loop
+                logger.exception("collector: unexpected error in stocktwits")
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=delay * 60)
+            except asyncio.TimeoutError:
+                pass
+
+
 def _floor_to_bucket(at: datetime) -> datetime:
     bucket = db.COMPACTION_BUCKET_SECONDS
     return datetime.fromtimestamp(int(at.timestamp()) // bucket * bucket, tz=timezone.utc)
@@ -523,6 +590,7 @@ async def main() -> None:
         okx_liquidation_poll_loop(stop_event),
         coinalyze_liquidation_poll_loop(stop_event),
         calendar_poll_loop(stop_event),
+        stocktwits_poll_loop(stop_event),
         compaction_loop(stop_event),
     )
 

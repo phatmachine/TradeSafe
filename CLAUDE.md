@@ -116,6 +116,19 @@ standalone Caddy variant is `deploy/docker-compose.standalone.yml`).
   source yet.
 - `python -m backend.research events` loads the same calendar into the research store
   (since 2023: 47 CPI, 47 jobs, 46 PCE, 31 FOMC).
+- **Stocktwits can't be read from here** (checked 2026-09-22, dev machine, residential
+  IP): every `api.stocktwits.com` and `stocktwits.com` URL — symbol streams, trending,
+  developer docs, terms, robots.txt — returns HTTP 403 with a Cloudflare *managed
+  challenge* ("Just a moment…") to httpx and curl, with or without a browser User-Agent.
+  Only a browser running the challenge's JavaScript gets through; don't build on getting
+  round it. Their developer page says new API registrations are closed. The Stocktwits
+  connector in Claude chat works (it confirmed BTC.X, ETH.X, SOL.X, ZEC.X, XRP.X, TAO.X,
+  HEMI.X exist) but TradeSafe can't use it, and it reshapes messages (flat `sentiment`
+  instead of v2's `entities.sentiment.basic`), so it can't stand in for a captured
+  payload. The source is built and registered **`enabled: false`** in sources.yaml; the
+  parser has only seen a fixture of the documented v2 shape. Before enabling, confirm a
+  fetch returns JSON from the host that runs the collector (the VPS is a datacenter IP,
+  which Cloudflare challenges at least as often) and read their terms on polling.
 
 ## Data verified against the exchanges (2026-09-19)
 
@@ -204,6 +217,29 @@ and setup code over ~3.7 years of free history (~3 min). Findings, 2026-09-19:
   and records one alert per episode; a failed trust gate doesn't end an episode. Delivery
   is browser-only while a tab is open (system notification, chime, banner). Not built:
   push/email/Telegram for a closed tab or phone.
+- **T4 belief data is walled off, not just unused** (Stocktwits, 2026-09-22). Doctrine
+  0.1 and Layer 1 exclude sentiment as a timing input, so it can't be allowed to reach a
+  decision even by accident. Three walls, each tested
+  (`backend/tests/test_belief_firewall.py`, with mutation checks that the tests fail when
+  a wall is removed):
+  1. Storage: T4 rows live in `belief_observations` (+ `belief_snapshots`, the response
+     body once per fetch, zlib); `insert_observation` refuses T4, and `Observation`
+     refuses a belief metric that isn't T4 or a T4 row that isn't a belief metric.
+  2. `backend/core/firewall.py`: every gate/compute/setup/classifier/factor entry point
+     carries `@decision_path`, which raises `BeliefDataInDecisionPath` on any T4
+     observation and hands a DataSource over as `GuardedSource` (decision reads only, no
+     `belief_observations`). A meta-test fails if a public function taking observations
+     or a DataSource lacks the decorator. Checks run at the outermost guarded call and on
+     every guarded read, not again on nested calls: re-scanning at each level made the
+     research harness 60% slower; now it's ~2% (C-level `map(attrgetter("tier"))`).
+  3. The report: `run_analysis` never receives belief data; `report/belief.build_report`
+     (API and CLI) runs it to completion, then attaches section 7, "Belief context (T4, not
+     evaluated)". The scanner and the DecisionRecord use the decision alone. The registry
+     never counts a T4 source toward independence or lists it in data integrity.
+  Belief settings live in `config/belief.yaml` (+ `catalysts.yaml`,
+  `t4_spam_patterns.yaml`), **not thresholds.yaml**: that file's hash is `config_hash`,
+  which stamps every DecisionRecord and seeds `run_id`, so tuning a belief setting there
+  would change decision records. Section 7 carries its own `belief_config_hash`.
 
 ## Open items
 
@@ -258,3 +294,9 @@ and setup code over ~3.7 years of free history (~3 min). Findings, 2026-09-19:
 - Layer 0's partial-snapshot rule is effectively off on Linux (no shared `collected_at`
   per fetch); fixing it changes live behaviour and needs a decision.
 - `regime.find_swings` counts the still-forming 4h bar as a confirming bar.
+- Stocktwits (section 7) is built but off; see "Data sources". Once it runs: a reading's
+  `observed_at` is the newest message and it expires 60 min later (`t4_expiry_minutes`,
+  uncalibrated), so a quiet ticker (HEMI.X has 43 watchers) will mostly show "no
+  unexpired reading". `st_msg_count` is the page size (30 in the documented API) on any
+  active ticker; a burst shows up as a short `st_window_minutes`. Response bodies are
+  kept whole with no retention limit, and their size is unmeasured (no live payload yet).

@@ -53,6 +53,14 @@ class DataSource(ABC):
         metric is far more rows than any single consumer needs."""
         ...
 
+    @abstractmethod
+    def belief_observations(self, instrument: str) -> list[Observation]:
+        """T4 belief data, unexpired as of get_as_of(), for report section 7 only. The
+        decision path never holds a DataSource with this method: every gate, compute and
+        setup receives core/firewall.GuardedSource, which exposes the two reads above and
+        nothing else."""
+        ...
+
 
 class LiveSource(DataSource):
     """Reads the store as of "now". Never fetches from a venue directly (implementation
@@ -91,6 +99,9 @@ class LiveSource(DataSource):
             lookback_seconds=lookback_seconds,
             metrics=metrics,
         )
+
+    def belief_observations(self, instrument: str) -> list[Observation]:
+        return db.query_belief_observations(self._conn, instrument=instrument, as_of=self.get_as_of())
 
 
 class ReplaySource(DataSource):
@@ -131,3 +142,6 @@ class ReplaySource(DataSource):
             lookback_seconds=lookback_seconds,
             metrics=metrics,
         )
+
+    def belief_observations(self, instrument: str) -> list[Observation]:
+        return db.query_belief_observations(self._conn, instrument=instrument, as_of=self.get_as_of())

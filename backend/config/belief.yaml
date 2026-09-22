@@ -1,0 +1,10 @@
+# T4 belief data (doctrine 0.1): what participants say, never what is true. Nothing here
+# can reach a gate, a setup or the verdict (core/firewall.py); it shapes report section 7,
+# "Belief context (T4, not evaluated)", only.
+#
+# Deliberately NOT in thresholds.yaml: that file's hash is config_hash, which stamps every
+# DecisionRecord, so a belief setting there would change decision records when tuned.
+# Section 7 carries its own hash over this file, catalysts.yaml and t4_spam_patterns.yaml.
+
+t4_expiry_minutes: 60   # belief half-life, from the newest message in a fetch; calibrate, don't guess further
+t4_min_tagged: 20       # fewer Bullish + Bearish tagged messages than this: st_bull_share is UNKNOWN

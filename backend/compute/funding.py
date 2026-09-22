@@ -13,9 +13,11 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from backend.core.firewall import decision_path
 from backend.core.observation import Observation
 
 
+@decision_path
 def period_means(funding_history: list[Observation], bucket_seconds: int) -> list[Decimal]:
     """Oldest first, one value per period that has any reading."""
     by_period: dict[int, dict[str, Decimal]] = {}

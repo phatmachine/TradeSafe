@@ -16,6 +16,7 @@ from enum import Enum
 
 from backend.compute.volatility import realised_volatility_annualised
 from backend.core.config import Config
+from backend.core.firewall import decision_path
 from backend.core.observation import Observation
 
 
@@ -39,6 +40,7 @@ class RegimeResult:
     evidence: dict
 
 
+@decision_path
 def resample_closes(observations: list[Observation], bucket_seconds: int) -> list[tuple[int, Decimal]]:
     """Buckets a single venue's price series into fixed-width bars, close = last tick in
     the bucket. Callers must pre-filter to one venue (never-mix-venues)."""
@@ -80,6 +82,7 @@ def _monotonic_lower_highs(highs: list[Decimal], margin_pct: Decimal) -> bool:
     return all(highs[i] <= highs[i - 1] * (1 - margin_pct) for i in range(1, len(highs)))
 
 
+@decision_path
 def classify(
     price_history: list[Observation],
     *,

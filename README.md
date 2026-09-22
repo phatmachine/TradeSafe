@@ -17,8 +17,10 @@ generated from.
 
 ```
 backend/
-  config/        thresholds.yaml, universe.yaml, sources.yaml, instruments.yaml
-  core/          Observation model, half-life expiry, config loading, SourceRegistry
+  config/        thresholds.yaml, universe.yaml, sources.yaml, instruments.yaml, and
+                 belief.yaml / catalysts.yaml / t4_spam_patterns.yaml (T4 only)
+  core/          Observation model, half-life expiry, config loading, SourceRegistry,
+                 the T4 belief-data firewall
   sources/       venue/chain/liquidation fetchers — the only code that talks to the internet
   compute/       pure arithmetic: OI aggregation, volatility, regime, cohort, ratios
   gates/         Gate U (universe) and Layer 0 (data integrity) — fail-closed, no LLM

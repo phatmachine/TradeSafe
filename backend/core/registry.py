@@ -64,7 +64,9 @@ class SourceRegistry:
         return self._records.get(source_id)
 
     def enabled_sources(self) -> Iterable[SourceRecord]:
-        return (r for r in self._records.values() if r.enabled and not r.is_rejected)
+        """The sources a report's decision path reads. T4 (belief) sources are never
+        among them, enabled or not: they feed report section 7 only (core/firewall.py)."""
+        return (r for r in self._records.values() if r.enabled and not r.is_rejected and r.tier != Tier.T4)
 
     def independent_upstream_count(self, source_ids: Iterable[str]) -> int:
         """The core of 0.3: count distinct upstream_id values among the given
@@ -72,7 +74,8 @@ class SourceRegistry:
         upstreams: set[str] = set()
         for sid in source_ids:
             rec = self._records.get(sid)
-            if rec is None or rec.is_rejected:
+            # T4 is evidence of belief, never of fact (0.1), so it never confirms anything.
+            if rec is None or rec.is_rejected or rec.tier == Tier.T4:
                 continue
             upstreams.add(rec.upstream_id)
         return len(upstreams)

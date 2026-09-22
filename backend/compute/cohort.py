@@ -17,6 +17,7 @@ from decimal import Decimal
 from enum import Enum
 
 from backend.core.config import Config
+from backend.core.firewall import decision_path
 from backend.core.observation import Metric, Observation
 
 
@@ -49,6 +50,7 @@ def _bucket_liquidations(
     return buckets
 
 
+@decision_path
 def classify(liquidation_history: list[Observation], *, cfg: Config) -> CohortResult:
     """liquidation_history must come from the historical-series primitive
     (observations_including_expired), not observations() — liquidation events are

@@ -9,11 +9,13 @@ import math
 from dataclasses import dataclass
 from decimal import Decimal
 
+from backend.core.firewall import decision_path
 from backend.core.observation import Observation
 
 ANNUALISATION_FACTOR_DAILY = math.sqrt(365)
 
 
+@decision_path
 def daily_closes(observations: list[Observation]) -> list[Decimal]:
     """Last observation per UTC calendar day, from a single venue's series, sorted
     oldest-first. Callers must pre-filter to one venue — mixing venues into one price

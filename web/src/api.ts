@@ -59,6 +59,34 @@ export interface StructuralRead {
   read: string;
 }
 
+// Report section 7: T4 belief data. Never an input to the verdict or any check.
+export interface BeliefMetric {
+  metric: string;
+  label: string;
+  value: string | null; // null is UNKNOWN, never zero
+  unit: "count" | "minutes" | "ratio" | string;
+  note: string | null;
+}
+
+export interface BeliefSource {
+  source_id: string;
+  symbol: string | null;
+  status: "current" | "none_current" | "not_mapped" | "disabled";
+  detail: string | null;
+  collected_at: string | null;
+  observed_at: string | null;
+  expires_at: string | null;
+  metrics: BeliefMetric[];
+}
+
+export interface BeliefContextJSON {
+  title: string;
+  caption: string;
+  config_hash: string | null;
+  sources: BeliefSource[];
+  error: string | null; // section 7 couldn't be built; the decision above stands
+}
+
 export interface AnalysisReport {
   run_id: string;
   instrument: string;
@@ -74,6 +102,7 @@ export interface AnalysisReport {
   distance_to_flip: DistanceToFlipItem[];
   structural_reads: StructuralRead[];
   directional_factors?: DirectionalFactor[];
+  belief_context?: BeliefContextJSON | null;
 }
 
 export interface SetupAlert {

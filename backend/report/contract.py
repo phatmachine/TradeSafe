@@ -22,6 +22,7 @@ from backend.compute.ratios import carry_ratio, oi_to_market_cap, perp_to_spot_v
 from backend.compute.volatility import atr as atr_fn
 from backend.compute.volatility import daily_closes
 from backend.core.config import Config
+from backend.core.firewall import decision_path
 from backend.core.observation import MACRO, Metric, Observation
 from backend.core.registry import SourceRegistry
 from backend.gates import gate_u, layer_0
@@ -178,6 +179,9 @@ class AnalysisReport:
     structural_reads: list[dict]
     verdict_bias: str | None
     directional_factors: list[dict] = field(default_factory=list)
+    # Section 7, T4 belief data. Set only by report/belief.build_report after the decision
+    # above is complete; never read by anything that decides (core/firewall.py).
+    belief_context: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -195,6 +199,7 @@ class AnalysisReport:
             "distance_to_flip": self.distance_to_flip,
             "structural_reads": self.structural_reads,
             "directional_factors": self.directional_factors,
+            "belief_context": self.belief_context,
         }
 
 
@@ -237,6 +242,7 @@ def _data_integrity_summary(instrument: str, ds: DataSource, registry: SourceReg
     }
 
 
+@decision_path
 def run_analysis(instrument: str, ds: DataSource, cfg: Config, registry: SourceRegistry) -> AnalysisReport:
     as_of = ds.get_as_of()
     run_id = _run_id(instrument, as_of, cfg.config_hash)

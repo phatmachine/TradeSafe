@@ -39,7 +39,7 @@ from decimal import Decimal
 
 from backend.compute import regime as regime_mod
 from backend.core.config import Config, load_config, with_override
-from backend.core.observation import MACRO, Metric
+from backend.core.observation import MACRO, Metric, Tier
 from backend.research import store
 from backend.setups import cascade, continuation, event, exhaustion
 from backend.sources.calendar import EVENT_KINDS
@@ -67,6 +67,9 @@ class Point:
     """Stand-in for an Observation carrying only what regime and setup code read."""
 
     __slots__ = ("metric", "venue", "observed_at", "value")
+    # Exchange history, the tier live collection gives the same data. The belief firewall
+    # (core/firewall.py) reads it on every list the setups are handed.
+    tier = Tier.T1
 
     def __init__(self, metric: Metric, venue: str, ts: int, value: Decimal):
         self.metric = metric

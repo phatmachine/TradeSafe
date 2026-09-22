@@ -13,10 +13,12 @@ from decimal import Decimal
 from backend.compute import cohort as cohort_mod
 from backend.compute.oi import aggregate_oi_series
 from backend.core.config import Config
+from backend.core.firewall import decision_path
 from backend.core.observation import Metric
 from backend.replay.source import DataSource
 
 
+@decision_path
 def evaluate_exit(position: dict, ds: DataSource, cfg: Config) -> dict:
     instrument = position["instrument"]
     setup = position["setup"]

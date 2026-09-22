@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import zlib
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -124,6 +125,35 @@ CREATE TABLE IF NOT EXISTS scan_runs (
     errors TEXT NOT NULL DEFAULT ''
 );
 
+-- T4 belief data (sources/stocktwits.py). Its own tables, never the observations table:
+-- no decision-path query can return a belief row (core/firewall.py). One snapshot per
+-- fetch holds the response body exactly as received (zlib), so every metric can be
+-- recomputed from it; the metrics derived from it point back at it.
+CREATE TABLE IF NOT EXISTS belief_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_id TEXT NOT NULL,
+    instrument TEXT NOT NULL,
+    collected_at TEXT NOT NULL,
+    body_zlib BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS belief_observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL REFERENCES belief_snapshots(id),
+    metric TEXT NOT NULL,
+    instrument TEXT NOT NULL,
+    value TEXT,              -- NULL is UNKNOWN (too few tagged messages), never zero
+    unit TEXT NOT NULL,
+    venue TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    tier TEXT NOT NULL CHECK (tier = 'T4'),
+    collected_at TEXT NOT NULL,
+    observed_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    raw TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_belief_lookup
+    ON belief_observations (instrument, observed_at);
+
 -- Upcoming scheduled macro releases (sources/calendar.py), for display only: not evidence,
 -- and nothing a report computes reads it. The collector replaces a kind's rows whole on
 -- every poll that reads its source, so a rescheduled release never keeps its old date.
@@ -170,6 +200,11 @@ def _iso(dt: datetime) -> str:
 
 
 def insert_observation(conn: sqlite3.Connection, obs: Observation) -> int:
+    if obs.tier == Tier.T4:
+        raise ValueError(
+            f"{obs.metric.value} is T4 belief data: it goes to belief_observations "
+            "(insert_belief_fetch), never the table the decision path reads"
+        )
     cur = conn.execute(
         """INSERT INTO observations
            (metric, instrument, value, unit, venue, source_id, tier,
@@ -196,7 +231,7 @@ def _row_to_observation(row: sqlite3.Row) -> Observation:
     return Observation(
         metric=Metric(row["metric"]),
         instrument=row["instrument"],
-        value=Decimal(row["value"]),
+        value=None if row["value"] is None else Decimal(row["value"]),
         unit=Unit(row["unit"]),
         venue=row["venue"],
         source_id=row["source_id"],
@@ -631,3 +666,68 @@ def recent_macro_events(conn: sqlite3.Connection, *, since: datetime) -> list[di
         (_iso(since),),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def insert_belief_fetch(
+    conn: sqlite3.Connection,
+    *,
+    source_id: str,
+    instrument: str,
+    collected_at: datetime,
+    body: bytes,
+    observations: list[Observation],
+) -> int:
+    """One T4 fetch: its response body, stored once, and the metrics derived from it.
+    Refuses anything that isn't T4, so this table can't become a side door into the
+    decision path's. Returns the snapshot id."""
+    wrong = [o for o in observations if o.tier != Tier.T4]
+    if wrong:
+        raise ValueError(f"belief_observations takes T4 only, got {sorted({o.tier.value for o in wrong})}")
+    cur = conn.execute(
+        "INSERT INTO belief_snapshots (source_id, instrument, collected_at, body_zlib) VALUES (?, ?, ?, ?)",
+        (source_id, instrument, _iso(collected_at), zlib.compress(body, 9)),
+    )
+    snapshot_id = int(cur.lastrowid)
+    conn.executemany(
+        """INSERT INTO belief_observations
+           (snapshot_id, metric, instrument, value, unit, venue, source_id, tier,
+            collected_at, observed_at, expires_at, raw)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            (
+                snapshot_id,
+                o.metric.value,
+                o.instrument,
+                None if o.value is None else str(o.value),
+                o.unit.value,
+                o.venue,
+                o.source_id,
+                o.tier.value,
+                _iso(o.collected_at),
+                _iso(o.observed_at),
+                _iso(o.expires_at),
+                json.dumps(o.raw, default=str),
+            )
+            for o in observations
+        ],
+    )
+    return snapshot_id
+
+
+def query_belief_observations(conn: sqlite3.Connection, *, instrument: str, as_of: datetime) -> list[Observation]:
+    """The only read of belief data, for report section 7. Unexpired as of `as_of`
+    (doctrine 0.2), and nothing collected after it: a stream's observed_at is its newest
+    message, which can be well before the fetch that saw it, so observed_at alone would
+    let a replay read a fetch that hadn't happened yet."""
+    rows = conn.execute(
+        """SELECT * FROM belief_observations
+           WHERE instrument = ? AND observed_at <= ? AND collected_at <= ? AND expires_at > ?
+           ORDER BY collected_at ASC, id ASC""",
+        (instrument, _iso(as_of), _iso(as_of), _iso(as_of)),
+    ).fetchall()
+    return [_row_to_observation(r) for r in rows]
+
+
+def belief_snapshot_body(conn: sqlite3.Connection, snapshot_id: int) -> bytes | None:
+    row = conn.execute("SELECT body_zlib FROM belief_snapshots WHERE id = ?", (snapshot_id,)).fetchone()
+    return zlib.decompress(row[0]) if row else None

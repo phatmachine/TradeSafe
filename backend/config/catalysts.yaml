@@ -1,0 +1,10 @@
+# Keywords for st_catalyst_mentions (sources/stocktwits.py): a message counts once if its
+# body contains any of its instrument's keywords, case-insensitive. An instrument with no
+# entry gets no st_catalyst_mentions at all, not a zero: "nobody mentions it" is a reading
+# only when there is something to mention.
+#
+# Belief data only (config/belief.yaml). List a keyword for a known, dated catalyst, so
+# that zero mentions before it means something; remove it once the catalyst has passed.
+
+catalysts:
+  SOL: [alpenglow, votor]   # Solana consensus upgrade (Alpenglow) and its voting component (Votor)

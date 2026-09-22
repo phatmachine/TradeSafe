@@ -703,3 +703,33 @@ body {
     --text: #f2f3ee;
   }
 }
+
+/* Report section 7, belief context (T4). Neutral only: green and red on this page mean
+   evidence for or against a side, and belief data is neither. */
+.belief-tag {
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+  vertical-align: middle;
+}
+.belief-card { border-style: dashed; }
+.belief-caption { font-size: 13px; font-weight: 600; color: var(--text-dim); margin-bottom: 6px; }
+.belief-source { padding: 10px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.belief-caption + .belief-source { border-top: none; }
+.belief-when { font-size: 11.5px; color: var(--text-faint); }
+.belief-metric {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+  padding: 5px 0;
+  color: var(--text-dim);
+}
+.belief-value { color: var(--text); }
+.belief-value.unknown { color: var(--text-faint); }
+.belief-note { flex-basis: 100%; }
+.belief-meta { margin-top: 8px; font-size: 11px; color: var(--text-faint); }

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+from backend.core.firewall import decision_path
 from backend.core.observation import Metric, Observation
 
 
@@ -35,6 +36,7 @@ class AggregateOI:
         return len(self.per_venue)
 
 
+@decision_path
 def latest_per_venue(observations: list[Observation]) -> dict[str, Observation]:
     """Most recent observation per venue. Callers pass observations already filtered to
     a single metric and already excluded of expired rows (the store's as_of query does
@@ -47,6 +49,7 @@ def latest_per_venue(observations: list[Observation]) -> dict[str, Observation]:
     return latest
 
 
+@decision_path
 def aggregate_oi_coin(observations: list[Observation]) -> AggregateOI:
     oi_obs = [o for o in observations if o.metric == Metric.OI_COIN]
     per_venue = latest_per_venue(oi_obs)
@@ -62,6 +65,7 @@ def aggregate_oi_coin(observations: list[Observation]) -> AggregateOI:
 MAX_STALENESS_SECONDS = 3600
 
 
+@decision_path
 def aggregate_oi_series(
     observations: list[Observation],
     bucket_seconds: int,

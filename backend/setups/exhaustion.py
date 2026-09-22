@@ -12,12 +12,14 @@ from backend.compute.ratios import carry_ratio
 from backend.compute.regime import find_swings, resample_closes
 from backend.compute.volatility import atr as atr_fn
 from backend.core.config import Config
+from backend.core.firewall import decision_path
 from backend.core.observation import Metric, Observation
 from backend.gates.common import ConditionResult, GateResult
 
 SETUP_NAME = "positioning_exhaustion"
 
 
+@decision_path
 def evaluate(
     instrument: str,
     *,

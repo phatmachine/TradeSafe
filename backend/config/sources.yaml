@@ -104,6 +104,45 @@ sources:
     metrics: [event]
     note: "Decision = last day of each regular meeting, statement at 2:00 p.m. New York."
 
+  # T4 belief data (doctrine 0.1): what participants say, never what is true. Feeds report
+  # section 7 only; core/firewall.py stops it at every gate, compute, setup and
+  # classifier, and the registry never counts a T4 source toward independence.
+  - source_id: stocktwits
+    name: "Stocktwits public symbol stream"
+    upstream_id: stocktwits
+    collection_method: venue_api
+    tier: T4
+    enabled: false
+    metrics: [st_msg_count, st_window_minutes, st_bull_tagged, st_bear_tagged, st_bull_share,
+              st_watchers, st_catalyst_mentions, st_spam_share]
+    endpoints:
+      stream: "https://api.stocktwits.com/api/2/streams/symbol/{symbol}.json"   # UNVERIFIED, see below
+    symbol_map:          # TradeSafe instrument -> Stocktwits symbol (each confirmed to exist 2026-09-22)
+      BTC: BTC.X
+      ETH: ETH.X
+      SOL: SOL.X
+      ZEC: ZEC.X
+      XRP: XRP.X
+      TAO: TAO.X
+      HEMI: HEMI.X
+    poll_minutes: 15
+    max_backoff_minutes: 240   # 403/429/5xx double the wait up to this; a success resets it
+    note: >
+      Off until the stream can be read. Checked 2026-09-22 from the development machine
+      (residential IP): every api.stocktwits.com and stocktwits.com URL (symbol streams
+      for SOL.X, BTC.X, ZEC.X and HEMI.X, trending, the developer docs, the terms,
+      robots.txt) returns HTTP 403 with a Cloudflare managed challenge ("Just a
+      moment...") to httpx and curl alike, with or without a browser User-Agent. Only a
+      browser that runs the challenge's JavaScript gets through, and getting round a bot
+      wall is not something to build on. Stocktwits' developer page says new API
+      registrations are closed, and the terms (for automated polling) couldn't be read
+      from here. No other endpoint (sentiment scores, message volume) was assumed or
+      tried. The VPS is a datacenter IP, which Cloudflare challenges at least as often.
+      Parser written to the documented v2 payload (messages[].created_at,
+      messages[].entities.sentiment.basic, symbol.watchlist_count) and tested against a
+      fixture of that shape; it has never seen a live response. Set enabled: true only
+      once a fetch from the host that runs the collector returns JSON.
+
   # Optional / disabled by default per implementation-spec "Spend nothing until
   # calibration" — flip enabled: true only once a specific gap appears in the sweep.
   - source_id: coinglass

@@ -1,0 +1,12 @@
+# Regexes for st_spam_share (sources/stocktwits.py): the share of a fetch's messages whose
+# body matches any of these, case-insensitive. Unvalidated placeholders, like every other
+# threshold: a starting list of what promotional posts on crypto tickers look like.
+# Belief data only (config/belief.yaml).
+
+patterns:
+  - 'price[\s-]*prediction'          # "Solana Price Prediction 2026, 2030" link posts
+  - '\b0x[0-9a-f]{40}\b'             # EVM contract address
+  - '\b[1-9A-HJ-NP-Za-km-z]{32,44}\b' # base58 address (Solana mint / wallet)
+  - '\bgems?\b'
+  - '\b\d{2,}x\b'                    # "100x", "1000x"
+  - 't\.me/|discord\.gg/'            # invite links

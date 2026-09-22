@@ -16,6 +16,7 @@ from decimal import Decimal
 
 from backend.compute.oi import latest_per_venue
 from backend.core.config import Config
+from backend.core.firewall import decision_path
 from backend.core.observation import Metric, Observation
 from backend.core.registry import SourceRegistry
 from backend.gates.common import ConditionResult, GateResult
@@ -62,6 +63,7 @@ def _find_poisoned_snapshots(raw: list[Observation], as_of) -> set[tuple[str, ob
     return poisoned
 
 
+@decision_path
 def evaluate(instrument: str, ds: DataSource, cfg: Config, registry: SourceRegistry) -> Layer0Result:
     conditions: list[ConditionResult] = []
     as_of = ds.get_as_of()
