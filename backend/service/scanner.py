@@ -1,4 +1,4 @@
-"""Scheduled setup scan. Every TRADESAFE_SCAN_INTERVAL_MINUTES (default 15) it runs the
+"""Scheduled setup scan. Every TRADESAFE_SCAN_INTERVAL_MINUTES (default 10) it runs the
 same run_analysis() an on-demand report uses over every watched instrument, persists the
 report like any other, and records an alert the first time a setup qualifies: once per
 episode, not on every scan while the setup keeps qualifying.
@@ -30,7 +30,7 @@ FIRST_SCAN_DELAY_SECONDS = 60
 
 def interval_seconds() -> int:
     """0 or less turns the scanner off."""
-    return int(float(os.environ.get("TRADESAFE_SCAN_INTERVAL_MINUTES", "15")) * 60)
+    return int(float(os.environ.get("TRADESAFE_SCAN_INTERVAL_MINUTES", "10")) * 60)
 
 
 def qualifying_setups(report: AnalysisReport) -> set[str] | None:

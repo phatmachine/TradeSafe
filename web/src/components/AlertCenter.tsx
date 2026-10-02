@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertsResponse, api, ApiError, SetupAlert } from "../api";
 
-// Server-side scans run every 15 minutes; checking twice a minute keeps delivery prompt.
+// Server-side scans run every 10 minutes; checking twice a minute keeps delivery prompt.
 // Browsers slow timers in background tabs to about once a minute, which is still fine.
 const POLL_MS = 30_000;
 const BASE_TITLE = document.title;

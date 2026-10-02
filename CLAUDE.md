@@ -213,7 +213,7 @@ and setup code over ~3.7 years of free history (~3 min). Findings, 2026-09-19:
   duplicated shared rows under "absorption — both sides". Presentation only — the report
   contract, verdicts, structural reads, scanner and alerts are untouched.
 - **Alerts**: a scanner in the API process (not the collector, which holds no decision
-  logic) runs every watched coin every `TRADESAFE_SCAN_INTERVAL_MINUTES` (default 15)
+  logic) runs every watched coin every `TRADESAFE_SCAN_INTERVAL_MINUTES` (default 10)
   and records one alert per episode; a failed trust gate doesn't end an episode. Delivery
   is browser-only while a tab is open (system notification, chime, banner). Not built:
   push/email/Telegram for a closed tab or phone.
