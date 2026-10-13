@@ -87,6 +87,56 @@ export interface BeliefContextJSON {
   error: string | null; // section 7 couldn't be built; the decision above stands
 }
 
+// Report section 8: leverage risk. Context only: never an input to the verdict or any
+// check, and never a suggested leverage or size.
+export interface LeverageRow {
+  leverage: number;
+  liquidating_move: number;
+  long_breach_rate: number | null; // null: not enough stored history, never zero
+  short_breach_rate: number | null;
+  move_vs_typical: number | null;
+}
+
+export interface LeverageRiskJSON {
+  title: string;
+  caption: string;
+  context_hash?: string;
+  status?: "ok" | "insufficient_history";
+  venue?: string | null;
+  hold_days?: number;
+  maintenance_margin_rate?: number;
+  history_days?: number;
+  windows?: number;
+  daily_volatility?: number | null;
+  typical_hold_move?: number | null;
+  rows?: LeverageRow[];
+  note?: string;
+  error: string | null;
+}
+
+// Each setup's measured record from the research replay, and whether it raises alerts.
+export type RecordStatus = "supported" | "losing" | "unproven" | "no_direction" | "no_record";
+
+export interface SetupRecord {
+  setup: string;
+  status: RecordStatus;
+  alerts: boolean;
+  status_label: string;
+  summary: string;
+  record: { note?: string; signals: number; side: string } | null;
+}
+
+export interface TrackRecordsJSON {
+  title: string;
+  caption: string;
+  context_hash?: string;
+  measured_at?: string;
+  method?: string;
+  caveats?: string[];
+  setups: SetupRecord[];
+  error: string | null;
+}
+
 export interface AnalysisReport {
   run_id: string;
   instrument: string;
@@ -103,6 +153,8 @@ export interface AnalysisReport {
   structural_reads: StructuralRead[];
   directional_factors?: DirectionalFactor[];
   belief_context?: BeliefContextJSON | null;
+  leverage_risk?: LeverageRiskJSON | null;
+  track_records?: TrackRecordsJSON | null;
 }
 
 export interface SetupAlert {
@@ -129,6 +181,7 @@ export interface AlertsResponse {
   alerts: SetupAlert[];
   latest_id: number;
   scanner: { interval_minutes: number; last_run: ScanRun | null; watched: number };
+  track_records?: TrackRecordsJSON;
 }
 
 export interface CalendarEvent {

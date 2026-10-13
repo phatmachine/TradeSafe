@@ -241,6 +241,25 @@ and setup code over ~3.7 years of free history (~3 min). Findings, 2026-09-19:
   which stamps every DecisionRecord and seeds `run_id`, so tuning a belief setting there
   would change decision records. Section 7 carries its own `belief_config_hash`.
 
+- **Leverage risk and setup track records** (2026-10-13, `report/context.py`,
+  `compute/leverage.py`, settings in `config/context.yaml`, outside `config_hash` like
+  belief.yaml). Added after the decision like section 7, tested to leave the decision and
+  DecisionRecord byte-identical (`tests/test_context.py`).
+  - Section 8, leverage risk: per leverage, the move that liquidates an isolated position
+    ((1 - L x 1%) / L) and the share of overlapping 10-day windows in the stored 4h closes
+    where price moved that far against a long / a short. Closes miss wicks, so a floor.
+    Why: across 4 coins 2023-25, holding 5x was liquidated in 50% of 90-day windows even in
+    a bull market, 2x in 5%; across every test leverage decided outcomes more than any
+    signal did. Evidence about risk only: never a size or a leverage to use.
+  - Track records: each setup's research-replay record (4 coins, 4h grid, config
+    befe4cf39d125608) and an alert rule. With >= 20 signals, a setup alerts only if both
+    its average and typical result are above zero; cascade (median -0.5%, one +139% signal
+    carries the average), squeeze (average -1.1%) and downtrend continuation (-4.1%) now
+    qualify without alerting. Trend continuation (7 signals) alerts as unproven;
+    exhaustion and event decompression have no live direction and alert as such. Episodes
+    are tracked the same either way. **Re-measure the records (and update context.yaml)
+    whenever thresholds.yaml changes**: they're tied to the config hash they were measured at.
+
 ## Open items
 
 - `gate_u.reference_intended_size_coins: 1.0` is a placeholder for the real trade size;

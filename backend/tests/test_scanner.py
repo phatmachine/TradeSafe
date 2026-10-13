@@ -19,8 +19,10 @@ def report(verdict="NO_SETUP", passing=(), failing=("cascade_absorption",), bias
 
 
 def scan(r):
+    # Episode logic, with every setup's alerts on. Which setups the track records mute is
+    # tested in test_context.py.
     with db.get_connection() as conn:
-        return scanner.record_scan(conn, r)
+        return scanner.record_scan(conn, r, alerts_on=lambda setup: True)
 
 
 def test_a_setup_alerts_once_per_episode():

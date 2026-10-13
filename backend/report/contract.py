@@ -182,6 +182,10 @@ class AnalysisReport:
     # Section 7, T4 belief data. Set only by report/belief.build_report after the decision
     # above is complete; never read by anything that decides (core/firewall.py).
     belief_context: dict | None = None
+    # Section 8 and the setup track records. Set only by report/context.attach_context after
+    # the decision is complete; context only, never read by anything that decides.
+    leverage_risk: dict | None = None
+    track_records: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -200,6 +204,8 @@ class AnalysisReport:
             "structural_reads": self.structural_reads,
             "directional_factors": self.directional_factors,
             "belief_context": self.belief_context,
+            "leverage_risk": self.leverage_risk,
+            "track_records": self.track_records,
         }
 
 

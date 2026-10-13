@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertsResponse, api, ApiError, SetupAlert } from "../api";
+import { AlertsResponse, api, ApiError, SetupAlert, SetupRecord } from "../api";
 
 // Server-side scans run every 10 minutes; checking twice a minute keeps delivery prompt.
 // Browsers slow timers in background tabs to about once a minute, which is still fine.
@@ -13,13 +13,31 @@ const CASE_WORD: Record<string, string> = {
 };
 const BIAS_WORD: Record<string, string> = { long: "Long", short: "Short", unclear: "No clear direction" };
 
-function describe(a: SetupAlert) {
+// What the setup's measured record says, in a few words for a notification.
+function recordNote(rec?: SetupRecord): string | null {
+  if (!rec) return null;
+  switch (rec.status) {
+    case "supported":
+      return "Past record supports this setup";
+    case "unproven":
+      return `Unproven: ${rec.record?.signals ?? "few"} past signals`;
+    case "no_direction":
+      return "No direction: past record is price change, not a trade result";
+    case "no_record":
+      return "No past record yet";
+    default:
+      return null;
+  }
+}
+
+function describe(a: SetupAlert, rec?: SetupRecord) {
   if (a.is_test) {
     return { title: "TradeSafe test alert", body: "Alerts are working. A qualifying setup will arrive like this." };
   }
   const parts = [
     a.setup_case ? CASE_WORD[a.setup_case] : null,
     a.verdict_bias ? `Report direction: ${BIAS_WORD[a.verdict_bias]}` : null,
+    recordNote(rec),
   ].filter(Boolean);
   return { title: `${a.instrument}: ${a.setup.replace(/_/g, " ")} qualified`, body: parts.join(" · ") };
 }
@@ -79,6 +97,8 @@ export function AlertCenter({ onOpen }: { onOpen: (symbol: string) => void }) {
   const [scanner, setScanner] = useState<AlertsResponse["scanner"] | null>(null);
   const [permission, setPermission] = useState<Permission>(currentPermission);
   const [problem, setProblem] = useState<string | null>(null);
+  const [records, setRecords] = useState<Record<string, SetupRecord>>({});
+  const recordsRef = useRef<Record<string, SetupRecord>>({});
   const lastSeen = useRef<number | null>(null);
   const polling = useRef(false);
   const unread = useRef(0);
@@ -87,7 +107,7 @@ export function AlertCenter({ onOpen }: { onOpen: (symbol: string) => void }) {
 
   function notify(a: SetupAlert) {
     if (currentPermission() !== "granted") return;
-    const { title, body } = describe(a);
+    const { title, body } = describe(a, recordsRef.current[a.setup]);
     try {
       const n = new Notification(title, { body, tag: `tradesafe-alert-${a.id}`, requireInteraction: !a.is_test });
       n.onclick = () => {
@@ -116,6 +136,11 @@ export function AlertCenter({ onOpen }: { onOpen: (symbol: string) => void }) {
     polling.current = true;
     try {
       const r = await api.alerts(lastSeen.current ?? 0);
+      if (r.track_records) {
+        const map = Object.fromEntries(r.track_records.setups.map((s) => [s.setup, s]));
+        recordsRef.current = map;
+        setRecords(map);
+      }
       setScanner(r.scanner);
       setProblem(null);
       if (lastSeen.current === null) setRecent(r.alerts.slice(0, 5));  // history on load, no fanfare
@@ -170,6 +195,9 @@ export function AlertCenter({ onOpen }: { onOpen: (symbol: string) => void }) {
     setToasts((t) => t.filter((a) => a.id !== id));
   }
 
+  const muted = Object.values(records)
+    .filter((s) => !s.alerts)
+    .map((s) => s.setup.replace(/_/g, " "));
   const lastRun = scanner?.last_run;
   const overdue = lastRun && scanner && Date.now() - Date.parse(lastRun.finished_at) > 2 * scanner.interval_minutes * 60_000;
   const state =
@@ -186,7 +214,7 @@ export function AlertCenter({ onOpen }: { onOpen: (symbol: string) => void }) {
       {toasts.length > 0 && (
         <div className="toast-stack" role="status" aria-live="polite">
           {toasts.map((a) => {
-            const d = describe(a);
+            const d = describe(a, records[a.setup]);
             return (
               <div className={`toast ${a.is_test ? "test" : a.setup_case ?? ""}`} key={a.id}>
                 <div className="toast-body">
@@ -230,6 +258,11 @@ export function AlertCenter({ onOpen }: { onOpen: (symbol: string) => void }) {
         )}
         {lastRun?.errors && <div className="alert-line warn">Last check had errors: {lastRun.errors}</div>}
         <div className="alert-line">Keep this tab open to be alerted. Closing it stops alerts.</div>
+        {muted.length > 0 && (
+          <div className="alert-line">
+            No alerts for {muted.join(", ")}: their past records show them losing. They still appear in every report.
+          </div>
+        )}
 
         {permission === "denied" && (
           <div className="alert-line warn">
@@ -272,6 +305,9 @@ export function AlertCenter({ onOpen }: { onOpen: (symbol: string) => void }) {
                 </span>
                 {!a.is_test && a.setup_case && (
                   <span className={`case-tag ${a.setup_case}`}>{CASE_WORD[a.setup_case]}</span>
+                )}
+                {!a.is_test && recordNote(records[a.setup]) && (
+                  <span className="alert-record">{recordNote(records[a.setup])}</span>
                 )}
               </button>
             ))

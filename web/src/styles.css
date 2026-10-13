@@ -752,3 +752,23 @@ body {
 .belief-value.unknown { color: var(--text-faint); }
 .belief-note { flex-basis: 100%; }
 .belief-meta { margin-top: 8px; font-size: 11px; color: var(--text-faint); }
+
+/* Report section 8 (leverage risk) and setup track records: context, so no green/red. */
+.lev-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.lev-table th { text-align: left; font-weight: 500; color: var(--text-dim); font-size: 12px; padding: 0 8px 6px 0; }
+.lev-table td { padding: 6px 8px 6px 0; border-top: 1px solid var(--border); vertical-align: middle; }
+.lev-sub { color: var(--text-faint); font-size: 12px; margin-left: 8px; white-space: nowrap; }
+.lev-rate { position: relative; min-width: 90px; }
+.lev-bar { position: absolute; left: 0; top: 50%; height: 18px; transform: translateY(-50%); background: var(--amber); border-radius: 4px; }
+.lev-num { position: relative; padding-left: 6px; }
+.lev-rate.unknown { color: var(--text-faint); }
+.record-pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.record-pill.on { background: rgba(154,156,146,0.18); color: var(--text-dim); }
+.record-pill.off { background: rgba(245,192,101,0.16); color: var(--amber); }
+.record-method { margin-top: 10px; }
+.record-method summary { cursor: pointer; color: var(--text-dim); font-size: 12px; }
+.record-method ul { margin: 6px 0 0; padding-left: 18px; }
+.alert-record { display: block; color: var(--text-faint); font-size: 11px; margin-top: 2px; }
+@media (max-width: 520px) { .lev-sub { display: block; margin-left: 0; } }
+.lev-intro { font-size: 13px; color: var(--text-dim); margin-bottom: 10px; line-height: 1.5; }
+.lev-intro b { color: var(--text); }

@@ -1,0 +1,119 @@
+# Report context: settings and measured records the report SHOWS, never anything that
+# DECIDES. Kept out of thresholds.yaml for the same reason belief.yaml is: thresholds.yaml
+# is hashed into config_hash, which stamps every DecisionRecord and seeds run_id. Nothing
+# here can change a gate, a setup, a verdict or a decision record (tests/test_context.py
+# checks that). The context sections carry this file's own hash as `context_hash`.
+
+# --- Leverage risk (report section 8) --------------------------------------------------
+# How far price has to move against a position before an exchange liquidates it, and how
+# often moves that large happened over the hold window in this coin's stored price
+# history. Evidence about risk, never a size or a recommended leverage.
+leverage_risk:
+  leverages: [2, 3, 5, 10]
+  # Binance's lowest USDT-M tiers use 0.4-1.5% maintenance margin depending on the coin;
+  # 1% is a middle value. The liquidating move is (1 - leverage * rate) / leverage.
+  maintenance_margin_rate: 0.01
+  hold_days: 10            # matches expected_hold_days_default in thresholds.yaml
+  bar_seconds: 14400       # 4h closes: what the 35-day price backfill stores
+  lookback_days: 60        # read up to this much stored price history
+  min_history_days: 17     # need hold_days + a week of start points, or the rates are unknown
+
+# --- Setup track records and the alert rule ---------------------------------------------
+# A setup's scheduled-scan alert is switched by its measured record, not by hand:
+#   - fewer than min_signals scored signals: "unproven", alerts stay on (the record can't
+#     say either way), and every alert says it is unproven;
+#   - at least min_signals, average AND typical (median) result above zero: "supported",
+#     alerts on;
+#   - at least min_signals and either one at or below zero: "losing", alerts off. The
+#     setup is still evaluated and shown in every report; only the alert stops;
+#   - a setup the live report gives no direction (positioning exhaustion, event
+#     decompression): "no_direction", alerts on, and its record is labelled as a price
+#     change or a research hypothesis, not a trade result.
+alert_policy:
+  min_signals: 20
+
+track_records:
+  measured_at: "2026-10-13"
+  method: >-
+    Research replay (backend/research/harness.py) over BTC, ETH, SOL and ZEC, Binance
+    history 2023-01-01 to 2026-09-17 (43.6 months per coin), evaluated every 4 hours at
+    thresholds config befe4cf39d125608. One signal per episode, held for the setup's
+    expected_hold_window_days, unleveraged, no fees or funding.
+  caveats:
+    - In-sample - thresholds were set while looking at this same history.
+    - Cascade and squeeze absorption were scored without their liquidation check (no free
+      liquidation history), so live they qualify less often than counted here.
+    - Unleveraged returns. With leverage the losses that pull these averages down are the
+      moves that liquidate a position.
+  setups:
+    cascade_absorption:
+      side: long
+      hold_days: 10
+      signals: 79
+      went_its_way: 0.468
+      random_entry: 0.523
+      mean_return: 0.0235
+      median_return: -0.0049
+      worst_return: -0.289
+      best_return: 1.390
+      note: Average carried by one +139% signal; the typical signal lost.
+    squeeze_absorption:
+      side: short
+      hold_days: 10
+      signals: 215
+      went_its_way: 0.558
+      random_entry: 0.477
+      mean_return: -0.0105
+      median_return: 0.0118
+      worst_return: -1.538
+      best_return: 0.498
+      note: Right more often than a random short, but its losses outweigh its wins.
+    trend_continuation_leverage_reset:
+      side: long
+      hold_days: 14
+      signals: 7
+      went_its_way: 0.429
+      random_entry: 0.524
+      mean_return: 0.3142
+      median_return: -0.0703
+      worst_return: -0.305
+      best_return: 1.641
+      note: Average carried by three ZEC signals; the other four lost.
+    downtrend_continuation_leverage_reset:
+      side: short
+      hold_days: 14
+      signals: 25
+      went_its_way: 0.440
+      random_entry: 0.476
+      mean_return: -0.0414
+      median_return: -0.0113
+      worst_return: -0.685
+      best_return: 0.258
+    positioning_exhaustion:
+      side: none
+      measure: price rose
+      hold_days: 14
+      signals: 506
+      went_its_way: 0.532
+      random_entry: 0.524
+      mean_return: 0.0207
+      median_return: 0.0103
+      worst_return: -0.382
+      best_return: 0.614
+      note: >-
+        No direction, so there is no trade result. Figures are the coin's price change
+        over the next 14 days, against 52.4% of all 14-day windows rising.
+    event_decompression:
+      side: none
+      measure: price moved against the crowd positioned going into the event
+      hold_days: 5
+      signals: 28
+      went_its_way: 0.607
+      random_entry: 0.494
+      mean_return: -0.0026
+      median_return: 0.0414
+      worst_return: -0.301
+      best_return: 0.221
+      note: >-
+        The live report gives no direction. Figures score the research hypothesis of
+        fading whoever was crowded going into the event, which the report doesn't state.

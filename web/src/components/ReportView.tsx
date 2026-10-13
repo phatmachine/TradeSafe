@@ -2,6 +2,7 @@ import { AnalysisReport, DistanceToFlipItem } from "../api";
 import { readable } from "../format";
 import { AbsorptionCard, SHARED } from "./AbsorptionCard";
 import { BeliefContext } from "./BeliefContext";
+import { LeverageRisk, TrackRecords } from "./ContextSections";
 import { GateCard } from "./GateCard";
 
 // Cascade and squeeze share three of their five checks (see AbsorptionCard), so a failing
@@ -259,6 +260,8 @@ export function ReportView({ report }: { report: AnalysisReport }) {
         </div>
       )}
 
+      {report.track_records && <TrackRecords records={report.track_records} />}
+
       {report.distance_to_flip.length > 0 && (
         <div className="section">
           <div className="section-title">Distance to flip</div>
@@ -277,6 +280,8 @@ export function ReportView({ report }: { report: AnalysisReport }) {
           </div>
         </div>
       )}
+
+      {report.leverage_risk && <LeverageRisk risk={report.leverage_risk} />}
 
       {report.belief_context && <BeliefContext context={report.belief_context} />}
     </div>

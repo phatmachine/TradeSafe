@@ -13,10 +13,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import Callable
 
 from backend.core.config import Config, load_config
 from backend.core.registry import SourceRegistry
 from backend.replay.source import LiveSource
+from backend.report.context import alerts_on as record_allows_alert
 from backend.report.contract import AnalysisReport, Verdict, persist_report, run_analysis
 from backend.scripts import backfill_history
 from backend.store import db
@@ -42,14 +44,22 @@ def qualifying_setups(report: AnalysisReport) -> set[str] | None:
     return {s["gate"] for s in report.setup_evaluation if s["passed"]}
 
 
-def record_scan(conn, report: AnalysisReport) -> list[dict]:
+def record_scan(conn, report: AnalysisReport, alerts_on: Callable[[str], bool] | None = None) -> list[dict]:
     """Compares this report with the instrument's last conclusive scan and stores an alert
-    for each setup that has started qualifying since. Returns the new alerts."""
+    for each setup that has started qualifying since, unless that setup's measured track
+    record (config/context.yaml) shows it losing. Episodes are tracked the same either way,
+    so a setup whose alerts are off doesn't re-alert the moment its record changes.
+    Returns the new alerts."""
+    alerts_on = alerts_on or record_allows_alert
     now = qualifying_setups(report)
     if now is None:
         return []
     before = db.get_qualifying_setups(conn, report.instrument)
     cases = {s["gate"]: s.get("case") for s in report.setup_evaluation}
+    started = sorted(now - before)
+    muted = [s for s in started if not alerts_on(s)]
+    if muted:
+        logger.info("scanner: %s qualified for %s; no alert (track record shows it losing)", ", ".join(muted), report.instrument)
     alerts = [
         db.insert_alert(
             conn,
@@ -63,7 +73,8 @@ def record_scan(conn, report: AnalysisReport) -> list[dict]:
                 "as_of": report.as_of,
             },
         )
-        for setup in sorted(now - before)
+        for setup in started
+        if setup not in muted
     ]
     db.set_qualifying_setups(conn, report.instrument, now)
     return alerts

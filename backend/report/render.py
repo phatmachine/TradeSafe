@@ -25,6 +25,10 @@ def _render_gate(gate: dict) -> str:
     return "\n".join(lines)
 
 
+def _pct(x) -> str:
+    return "unknown" if x is None else f"{float(x) * 100:.1f}%"
+
+
 _BIAS_LABEL = {"long": "LONG", "short": "SHORT", "unclear": "NO CLEAR DIRECTION"}
 _LEAN_LABEL = {"supports_long": "+ supports long", "against_long": "- against long", "neutral": "  neutral", "unknown": "? unknown"}
 
@@ -107,5 +111,40 @@ def render_text(report: AnalysisReport) -> str:
                 lines.append(f"    {m['metric']}: {value} — {m['label']}" + (f" ({m['note']})" if m["note"] else ""))
         if bc["config_hash"]:
             lines.append(f"  belief config {bc['config_hash']}")
+
+    lr = d.get("leverage_risk")
+    if lr:
+        lines += ["", f"-- {lr['title']} --", f"  {lr['caption']}"]
+        if lr.get("error"):
+            lines.append(f"  {lr['error']}")
+        elif lr["status"] != "ok":
+            lines.append(
+                f"  Not enough stored price history: {lr['history_days']} days, "
+                f"needs a {lr['hold_days']:g}-day window plus a week of start points."
+            )
+        else:
+            lines.append(
+                f"  {lr['windows']} {lr['hold_days']:g}-day windows over {lr['history_days']} days of "
+                f"{lr['venue']} closes; typical {lr['hold_days']:g}-day move now {_pct(lr['typical_hold_move'])}"
+            )
+        for row in lr.get("rows", []):
+            lines.append(
+                f"  {row['leverage']:g}x: liquidated by a {_pct(row['liquidating_move'])} move; "
+                f"long would have been liquidated in {_pct(row['long_breach_rate'])} of windows, "
+                f"short in {_pct(row['short_breach_rate'])}"
+            )
+        if lr.get("note"):
+            lines.append(f"  {lr['note']}")
+
+    tr = d.get("track_records")
+    if tr and (tr.get("setups") or tr.get("error")):
+        lines += ["", f"-- {tr['title']} --", f"  {tr['caption']}"]
+        if tr.get("error"):
+            lines.append(f"  {tr['error']}")
+        for s in tr.get("setups", []):
+            lines.append(f"  [{s['setup']}] {s['status_label']}")
+            lines.append(f"    {s['summary']}")
+            if s["record"] and s["record"].get("note"):
+                lines.append(f"    {s['record']['note']}")
 
     return "\n".join(lines)

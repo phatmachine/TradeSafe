@@ -19,6 +19,7 @@ from backend.core.config import load_config
 from backend.core.registry import SourceRegistry
 from backend.replay.source import LiveSource
 from backend.report.belief import build_report
+from backend.report.context import track_records
 from backend.report.contract import persist_report
 from backend.report.exit_monitor import evaluate_exit
 from backend.report.render import render_text
@@ -168,8 +169,9 @@ def get_report_text(symbol: str):
 
 @app.get("/api/alerts", dependencies=[Depends(require_auth)])
 def list_alerts(after: int = 0, limit: int = 20):
-    """What an open browser tab polls: alerts newer than `after` (newest first), plus
-    enough scanner state to show the scan is actually running."""
+    """What an open browser tab polls: alerts newer than `after` (newest first), enough
+    scanner state to show the scan is actually running, and each setup's track record and
+    alert status (config/context.yaml), so an alert can say how its setup has done."""
     with db.get_connection() as conn:
         return {
             "alerts": db.list_alerts(conn, after_id=after, limit=min(limit, 100)),
@@ -179,6 +181,7 @@ def list_alerts(after: int = 0, limit: int = 20):
                 "last_run": db.last_scan_run(conn),
                 "watched": len(db.list_watched_instruments(conn)),
             },
+            "track_records": track_records(),
         }
 
 

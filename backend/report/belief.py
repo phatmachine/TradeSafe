@@ -20,6 +20,7 @@ from backend.core.config import BeliefConfig, Config, load_belief_config
 from backend.core.observation import Metric, Observation
 from backend.core.registry import SourceRegistry
 from backend.replay.source import DataSource
+from backend.report.context import attach_context
 from backend.report.contract import AnalysisReport, run_analysis
 from backend.sources import stocktwits
 
@@ -100,7 +101,7 @@ def belief_context(instrument: str, ds: DataSource, cfg: Config, belief_cfg: Bel
 def build_report(
     instrument: str, ds: DataSource, cfg: Config, registry: SourceRegistry, belief_cfg: BeliefConfig | None = None
 ) -> AnalysisReport:
-    """The decision, then section 7 attached to it. What the API and CLI show; the scanner
+    """The decision, then section 7 and the section 8 context attached to it. What the API and CLI show; the scanner
     and the DecisionRecord use the decision alone. Section 7 failing (a bad belief config,
     say) leaves the decision standing and says so in section 7: belief data doesn't get to
     decide whether there is a report either."""
@@ -110,4 +111,4 @@ def build_report(
     except Exception as exc:  # noqa: BLE001
         context = {"title": TITLE, "caption": CAPTION, "config_hash": None, "sources": [],
                    "error": f"Belief context unavailable: {type(exc).__name__}: {exc}"}
-    return dataclasses.replace(decision, belief_context=context)
+    return attach_context(dataclasses.replace(decision, belief_context=context), ds)
