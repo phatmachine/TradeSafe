@@ -283,7 +283,7 @@ export function ReportView({ report }: { report: AnalysisReport }) {
 
       {report.leverage_risk && <LeverageRisk risk={report.leverage_risk} />}
 
-      {report.belief_context && <BeliefContext context={report.belief_context} />}
+      {report.belief_context && <BeliefContext context={report.belief_context} instrument={report.instrument} />}
     </div>
   );
 }

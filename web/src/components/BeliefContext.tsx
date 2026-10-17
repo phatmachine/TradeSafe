@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { BeliefContextJSON, BeliefMetric, BeliefSource } from "../api";
+import { coinName } from "../coinNames";
 
 // Report section 7: what participants say (T4), never what is true. Nothing here feeds the
 // verdict or any check, so it is drawn in neutral colours only: no green or red, which on
@@ -19,14 +20,18 @@ function when(iso: string) {
   return new Date(iso).toLocaleString([], { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 }
 
-function Source({ s, now }: { s: BeliefSource; now: number }) {
-  const name = `${SOURCE_NAME[s.source_id] ?? s.source_id}${s.symbol ? ` · ${s.symbol}` : ""}`;
+function Source({ s, now, instrument }: { s: BeliefSource; now: number; instrument: string }) {
+  // The coin's name (FET -> Fetch.AI), not the source's own symbol code (FET.X); the code
+  // stays available on hover.
+  const name = `${SOURCE_NAME[s.source_id] ?? s.source_id} · ${coinName(instrument)}`;
   // The server never returns an expired reading; this covers a page left open past expiry.
   const expired = s.expires_at != null && Date.parse(s.expires_at) <= now;
   return (
     <div className="belief-source">
       <div className="factor-head">
-        <span className="factor-name">{name}</span>
+        <span className="factor-name" title={s.symbol ?? undefined}>
+          {name}
+        </span>
         {s.status === "current" && !expired && s.observed_at && s.expires_at && (
           <span className="belief-when mono">
             newest message {when(s.observed_at)} · expires {when(s.expires_at)}
@@ -50,7 +55,7 @@ function Source({ s, now }: { s: BeliefSource; now: number }) {
   );
 }
 
-export function BeliefContext({ context }: { context: BeliefContextJSON }) {
+export function BeliefContext({ context, instrument }: { context: BeliefContextJSON; instrument: string }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const tick = window.setInterval(() => setNow(Date.now()), 60_000);
@@ -66,7 +71,7 @@ export function BeliefContext({ context }: { context: BeliefContextJSON }) {
         <div className="belief-caption">{context.caption}</div>
         {context.error && <div className="condition-detail">{context.error}</div>}
         {context.sources.map((s) => (
-          <Source s={s} now={now} key={s.source_id} />
+          <Source s={s} now={now} instrument={instrument} key={s.source_id} />
         ))}
         {context.config_hash && <div className="belief-meta mono">belief config {context.config_hash}</div>}
       </div>
